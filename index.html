@@ -463,6 +463,19 @@
 </div>
 
 
+
+  <!-- Gestion des lots -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title">🏷️ Lots disponibles</div>
+    <p style="font-size:12px;color:var(--gris-text);margin-bottom:10px;">Ces lots apparaissent dans les menus déroulants du tableau. Modifiez selon votre projet.</p>
+    <div id="lotsListEdit" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="newLotInput" placeholder="Nouveau lot..." style="flex:1;max-width:200px;">
+      <button class="btn btn-primary btn-sm" onclick="ajouterLot()">+ Ajouter</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetLots()">Réinitialiser</button>
+    </div>
+  </div>
+
 <!-- ============ TAB 2: PRE-REMPLISSAGE ============ -->
 <div class="panel" id="panel-prefill" style="display:none;">
 
@@ -836,7 +849,7 @@ async function testerCle() {
 // =============================================
 // DATA & STATE
 // =============================================
-const LOTS = ['Menuiserie','Métallerie','MIN façade SAN','Cloisons amovibles','Façade','Agencement'];
+let LOTS = JSON.parse(localStorage.getItem('custom_lots') || JSON.stringify(['Menuiserie','Menuiserie intérieure','Métallerie','MIN façade SAN','Cloisons amovibles','Façade','Agencement','Menuiserie extérieure']));
 const OUVERTURES = ['Simple action','Va-et-vient','Va-et-vient DAS','Coulissante'];
 const FEUX = ['E30','EI30','EI60','EI120','E60','Non feu'];
 const FPS = ['FP à compas - repère A','FP à glissière - repère B','FP encastré + sélecteur - repère C','FP à glissière + sélecteur','FP bandeau encastré','Sans'];
@@ -898,6 +911,40 @@ function showTab(tab) {
   if (tab === 'tableau') { renderTable(); renderStats(); }
 }
 
+
+function renderLotsEdit() {
+  const div = document.getElementById('lotsListEdit');
+  if (!div) return;
+  div.innerHTML = LOTS.map((lot, i) => `
+    <span style="display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;border:1px solid var(--gris-border);border-radius:20px;padding:3px 10px;font-size:12px;">
+      ${lot}
+      <button onclick="supprimerLot(${i})" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:14px;padding:0;line-height:1;">×</button>
+    </span>
+  `).join('');
+}
+
+function ajouterLot() {
+  const inp = document.getElementById('newLotInput');
+  const val = inp.value.trim();
+  if (!val || LOTS.includes(val)) return;
+  LOTS.push(val);
+  localStorage.setItem('custom_lots', JSON.stringify(LOTS));
+  inp.value = '';
+  renderLotsEdit();
+}
+
+function supprimerLot(i) {
+  LOTS.splice(i, 1);
+  localStorage.setItem('custom_lots', JSON.stringify(LOTS));
+  renderLotsEdit();
+}
+
+function resetLots() {
+  LOTS = ['Menuiserie','Menuiserie intérieure','Métallerie','MIN façade SAN','Cloisons amovibles','Façade','Agencement','Menuiserie extérieure'];
+  localStorage.setItem('custom_lots', JSON.stringify(LOTS));
+  renderLotsEdit();
+}
+
 function ouvrirParametres() {
   // Move rules panel content into settings panel
   const rulesPanel = document.getElementById('panel-rules');
@@ -909,6 +956,7 @@ function ouvrirParametres() {
     rulesPanel.style.padding = '0';
   }
   renderRulesTable();
+  renderLotsEdit();
   document.getElementById('settingsOverlay').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -2069,26 +2117,26 @@ function loadScript(src) {
 }
 
 const IMPORT_SYSTEM = `Tu es un expert en nomenclature de portes BTP (bâtiment bureaux France).
-On te donne le contenu brut d'un tableau de portes (CSV ou texte issu d'Excel).
+On te donne le contenu brut d'un tableau de portes (CSV ou texte issu d'Excel, parfois export Revit).
 Extrait TOUTES les portes identifiables et retourne un JSON valide — tableau d'objets.
 
-Règles d'extraction :
-- repere : numéro/identifiant de la porte (ex: PE_S2_01, R1.PAL.01, P4-PK-06-b, -2.001, etc.)
-- niveau : niveau du bâtiment (SS2, R-2, RDC, R+1, etc.) — souvent dans la première colonne ou ligne de groupe
-- local_int : local de provenance (côté gauche / "de" / "local 1")
-- local_ext : local de destination (côté droit / "vers" / "local 2") — peut être dans la même cellule que local_int séparé par "et", "→", "entre... et..."
-- lot : lot concerné si mentionné (Menuiserie, Métallerie, MIN, etc.)
-- largeur : largeur du vantail en mm si présente
-- hauteur : hauteur en mm si présente
-- degre_feu : degré coupe-feu si présent (EI30, E30, EI60, PF 1/2h → traduire en EI30, PF 1h → EI60, etc.)
-- acoustique : affaiblissement acoustique en dB si présent
+RÈGLES CRITIQUES :
+- local_int : NOM du local côté intérieur/provenance (ex: "Circulation", "Hall", "Bureau 12", "Chambre 11")
+- local_ext : NOM du local côté extérieur/destination (ex: "Escalier", "WC H", "Dégagement", "SDB 11")
+- INTERDIT dans local_int ou local_ext : "Nouveau", "Existant", "Neuf", "Conservé", "Replaquer", "Repeindre" — ce sont des états de rénovation, PAS des noms de locaux
+- neuf_reno : état de la porte — "Porte neuve" si Nouveau/Neuf, "Porte existante conservée en l'état" si Existant/Conservé, "Porte existante à replaquer" si Replaquer, "Porte existante à repeindre" si Repeindre. Par défaut "Porte neuve".
+- repere : identifiant unique (ex: POR-100-001, PE_S2_01, R1.PAL.01)
+- niveau : niveau bâtiment (SS2, RDC, R+1…)
+- lot : Menuiserie | Métallerie | Menuiserie intérieure | MIN façade SAN | Façade | Agencement
+- largeur/hauteur : en mm
+- degre_feu : EI30, E30, EI60… (traduire PF 1/2h→EI30, PF 1h→EI60)
+- acoustique : valeur en dB
 
-Si local_int et local_ext sont dans la même colonne texte du type "entre X et Y" ou "X → Y", sépare-les.
-Si une ligne n'a pas de repère identifiable, essaie quand même si elle a des locaux.
+Si local_int et local_ext sont dans la même cellule "entre X et Y" ou "X → Y", sépare-les.
 Ignore les lignes d'en-tête, légendes, totaux.
 
 Réponds UNIQUEMENT avec du JSON valide — tableau, sans markdown :
-[{"repere":"...","niveau":"...","local_int":"...","local_ext":"...","lot":"...","largeur":null,"hauteur":null,"degre_feu":null,"acoustique":null}]`;
+[{"repere":"...","niveau":"...","local_int":"...","local_ext":"...","lot":"Menuiserie","neuf_reno":"Porte neuve","largeur":null,"hauteur":null,"degre_feu":null,"acoustique":null}]`;
 
 async function analyserAvecClaude(textContent, filename, type) {
   const msg = document.getElementById('importLoadingMsg');
