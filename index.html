@@ -242,6 +242,7 @@
     oninput="sauvegarderCle(this.value)" autocomplete="off">
   <button onclick="testerCle()">Tester</button>
   <span id="apiStatus" style="font-size:11px;"></span>
+  <button onclick="localStorage.clear();location.reload();" style="padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid #fcd34d;background:white;color:#92400e;" title="Vider toutes les clés mémorisées">🗑️ Reset</button>
   <span style="margin-left:auto;font-size:11px;color:#a16207;">Clé stockée dans le navigateur (localStorage)</span>
 </div>
 
@@ -2304,13 +2305,12 @@ const DESTINATIONS = Object.keys(RULES_BASE_ALL);
 
 function changerDestination(dest) {
   currentRules = JSON.parse(JSON.stringify(RULES_BASE_ALL[dest] || RULES_BASE_ALL['Bureaux (BUP)']));
-  document.getElementById('destLabel').textContent = dest;
+  const lbl = document.getElementById('destLabel'); if (lbl) lbl.textContent = dest;
   const isLogement = dest.includes('Logement');
   const sel = document.getElementById('familleSelect');
-  sel.style.opacity = isLogement ? '1' : '0.4';
-  sel.style.pointerEvents = isLogement ? 'auto' : 'none';
+  if (sel) { sel.style.opacity = isLogement ? '1' : '0.4'; sel.style.pointerEvents = isLogement ? 'auto' : 'none'; }
   renderRulesTable();
-  document.getElementById('cnt-rules').textContent = currentRules.length + ' règles';
+  const cnt = document.getElementById('cnt-rules'); if (cnt) cnt.textContent = currentRules.length + ' règles';
 }
 
 function resetRulesBase() {
@@ -2618,6 +2618,12 @@ renderRulesTable();
 (function() {
   const prov = localStorage.getItem('api_provider') || 'anthropic';
   _currentProvider = prov;
+  // Fix: if stored key doesn't match stored provider, clear key
+  const storedProv = localStorage.getItem('api_provider') || 'anthropic';
+  const storedKey = localStorage.getItem('api_key_'+storedProv) || localStorage.getItem('anthropic_key') || '';
+  if (storedProv === 'gemini' && storedKey.startsWith('sk-ant')) {
+    localStorage.removeItem('api_key_gemini');
+  }
   const sel = document.getElementById('apiProviderSelect');
   if (sel) sel.value = prov;
   
