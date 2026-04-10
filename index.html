@@ -700,7 +700,7 @@ function sauvegarderCle(val) {
 // Call Gemini API (compatible format)
 async function callGemini(systemPrompt, userContent, maxTokens) {
   const key = getApiKey();
-  const model = 'gemini-1.5-flash';
+  const model = 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   
   // Build contents — Gemini doesn't have system role, prepend to user
@@ -725,7 +725,7 @@ async function callGemini(systemPrompt, userContent, maxTokens) {
 // Call Gemini with PDF document
 async function callGeminiWithPDF(systemPrompt, b64data, mimeType, userText, maxTokens) {
   const key = getApiKey();
-  const model = 'gemini-1.5-flash';
+  const model = 'gemini-2.0-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   
   const parts = [];
@@ -2358,7 +2358,7 @@ async function analyserNotices() {
       gParts.push({ text: NOTICE_SYSTEM + '\nExtrait toutes les exigences feu et acoustique par type de local.' });
       
       const key = getApiKey();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
       const resp = await fetch(url, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
