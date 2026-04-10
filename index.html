@@ -943,50 +943,87 @@ function processFile(file) {
   reader.readAsDataURL(file);
 }
 
-async function lancerReconnaissance() {
+async function lancerRecoIA() {
   if(!planFileData) return;
   const btn = document.getElementById('btnRecoIA');
   const spin = document.getElementById('spinRecoIA');
-  btn.disabled = true; spin.style.display='inline-block';
+  btn.disabled = true; if(spin) spin.style.display='inline-block';
 
-  const niveau = document.getElementById('recoNiveau').value || 'inconnu';
-  const instruct = document.getElementById('recoInstructions').value;
+  const niveau = document.getElementById('recoNiveau').value || '';
+  const instruct = document.getElementById('recoInstructions').value || '';
 
-  const prompt = `Tu es un expert en nomenclature de portes pour des bâtiments de bureaux français.
-Analyse ce plan architectural et identifie TOUTES les portes visibles.
-Pour chaque porte, fournis :
-- repere : l'identifiant de la porte sur le plan (ex: P.001, R1.ESC.01, etc.)
-- local_int : nom exact du local côté provenance
-- local_ext : nom exact du local côté destination
-- niveau : "${niveau}"
-- confiance : "haute" | "moyenne" | "faible"
+  const prompt = `Tu es un expert BTP français en nomenclature de portes.
+Analyse ce document (plan PDF ou tableau de portes exporté Revit/AutoCAD).
 
-Réponds UNIQUEMENT en JSON valide, tableau de portes :
-[{"repere":"...","local_int":"...","local_ext":"...","niveau":"${niveau}","confiance":"haute"}]
-${instruct ? 'Instructions supplémentaires : '+instruct : ''}`;
+RÈGLES IMPORTANTES :
+- "local_int" = NOM du local côté intérieur/provenance (ex: "Circulation", "Hall", "Bureau 12")
+- "local_ext" = NOM du local côté extérieur/destination (ex: "Escalier", "WC", "Chambre 11")
+- NE JAMAIS mettre "Nouveau", "Existant", "Neuf" dans local_int ou local_ext — ce sont des états de rénovation, pas des noms de locaux
+- "neuf_reno" = état : "Porte neuve" si Nouveau/Neuf, "Porte existante conservée en l'état" si Existant
+- "repere" = identifiant unique de la porte (ex: POR-100-001, P.RDC.01, PE_S2_01)
+- "niveau" = niveau du bâtiment. ${niveau ? `Niveau forcé: "${niveau}"` : 'Extrait du document'}
+
+Réponds UNIQUEMENT en JSON valide, sans markdown :
+[{"repere":"...","niveau":"...","local_int":"...","local_ext":"...","lot":"Menuiserie","neuf_reno":"Porte neuve","largeur":null,"hauteur":null,"degre_feu":null,"confiance":"haute"}]
+${instruct ? '\nInstructions supplémentaires : '+instruct : ''}`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:getHeaders(),
-      body:JSON.stringify({
-        model:window._workingModel||'claude-sonnet-4-6',
-        max_tokens:2000,
-        messages:[{role:'user',content:[
-          {type:'document',source:{type:'base64',media_type:'application/pdf',data:planFileData}},
-          {type:'text',text:prompt}
-        ]}]
-      })
+    let portes;
+    if (_currentProvider === 'gemini') {
+      // Gemini: use inline_data for PDF
+      const key = getApiKey();
+      const model = window._workingGeminiModel || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+      const r = await fetch(url, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents:[{parts:[
+            {inline_data:{mime_type:'application/pdf',data:planFileData}},
+            {text: prompt}
+          ]}],
+          generationConfig:{maxOutputTokens:4000,temperature:0.1}
+        })
+      });
+      const d = await r.json();
+      if(!r.ok) throw new Error(d?.error?.message || r.status);
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+      const clean = text.replace(/```json|```/g,'').trim();
+      portes = JSON.parse(clean);
+    } else {
+      // Claude
+      const resp = await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST', headers:getHeaders(),
+        body:JSON.stringify({
+          model:window._workingModel||'claude-sonnet-4-6', max_tokens:4000,
+          messages:[{role:'user',content:[
+            {type:'document',source:{type:'base64',media_type:'application/pdf',data:planFileData}},
+            {type:'text',text:prompt}
+          ]}]
+        })
+      });
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || '[]';
+      portes = JSON.parse(text.replace(/```json|```/g,'').trim());
+    }
+    // Post-process: fix "Nouveau"/"Existant" wrongly placed in local_int/local_ext
+    const RENO_VALS = ['nouveau','existant','neuf','conservé','replaquer','repeindre','porte neuve'];
+    portes = portes.map(p => {
+      const liLow = (p.local_int||'').toLowerCase();
+      const leLow = (p.local_ext||'').toLowerCase();
+      if (RENO_VALS.some(v => liLow === v)) {
+        if (!p.neuf_reno) p.neuf_reno = liLow.includes('exist') ? "Porte existante conservée en l'état" : "Porte neuve";
+        p.local_int = '';
+      }
+      if (RENO_VALS.some(v => leLow === v)) {
+        p.local_ext = '';
+      }
+      return p;
     });
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '[]';
-    const clean = text.replace(/```json|```/g,'').trim();
-    const portes = JSON.parse(clean);
     afficherResultatsReco(portes);
   } catch(e) {
-    alert('Erreur API: '+e.message);
+    alert('Erreur reconnaissance plan : '+e.message);
   }
-  btn.disabled = false; spin.style.display='none';
+  btn.disabled = false; if(spin) spin.style.display='none';
 }
 
 function afficherResultatsReco(portes) {
@@ -2372,7 +2409,7 @@ async function analyserNotices() {
       gParts.push({ text: NOTICE_SYSTEM + '\nExtrait toutes les exigences feu et acoustique par type de local.' });
       
       const key = getApiKey();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${window._workingGeminiModel||"gemini-2.0-flash"}:generateContent?key=${key}`;
       const resp = await fetch(url, {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
