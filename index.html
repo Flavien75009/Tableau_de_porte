@@ -700,7 +700,9 @@ function sauvegarderCle(val) {
 // Call Gemini API (compatible format)
 async function callGemini(systemPrompt, userContent, maxTokens) {
   const key = getApiKey();
-  const model = 'gemini-2.0-flash-lite';
+  // Try models in order until one works
+  const GEMINI_MODELS = ['gemini-2.5-flash-preview-04-17','gemini-1.5-flash-latest','gemini-1.5-pro-latest','gemini-2.0-flash-lite','gemini-pro'];
+  const model = window._workingGeminiModel || GEMINI_MODELS[0];
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
   
   // Build contents — Gemini doesn't have system role, prepend to user
@@ -783,13 +785,25 @@ async function testerCle() {
   st.textContent = 'Test en cours…';
 
   if (_currentProvider === 'gemini') {
-    try {
-      const text = await callGemini('', 'Réponds juste: ok', 10);
-      st.textContent = '✅ Gemini opérationnel !';
-      document.getElementById('apiBanner').classList.add('ok');
-    } catch(e) {
-      st.textContent = '❌ ' + e.message.slice(0, 100);
+    const MODELS = ['gemini-2.5-flash-preview-04-17','gemini-1.5-flash-latest','gemini-1.5-pro-latest','gemini-2.0-flash-lite','gemini-pro'];
+    for (const m of MODELS) {
+      try {
+        window._workingGeminiModel = m;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${getApiKey()}`;
+        const r = await fetch(url, {method:'POST',headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({contents:[{parts:[{text:'ok'}]}],generationConfig:{maxOutputTokens:5}})});
+        if (r.ok) {
+          st.textContent = '✅ Gemini opérationnel ! (' + m + ')';
+          document.getElementById('apiBanner').classList.add('ok');
+          return;
+        }
+        const err = await r.json();
+        if (r.status === 404 || (err?.error?.message||'').includes('not found') || (err?.error?.message||'').includes('no longer available')) continue;
+        st.textContent = '❌ ' + m + ': ' + (err?.error?.message||r.status).toString().slice(0,80);
+        return;
+      } catch(e) { st.textContent = '❌ ' + e.message.slice(0,80); return; }
     }
+    st.textContent = '❌ Aucun modèle Gemini disponible sur ce compte';
     return;
   }
 
