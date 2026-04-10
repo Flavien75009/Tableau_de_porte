@@ -819,59 +819,6 @@ async function testerCle() {
     }
   }
 }
-async function testerCle() {
-  const key = getApiKey();
-  if (!key) { alert('Entrez une clé API d\'abord.'); return; }
-  const st = document.getElementById('apiStatus');
-  st.textContent = 'Test en cours…';
-  
-  // Try models in order of preference
-  const models = ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-3-5-haiku-20241022'];
-  
-  for (const model of models) {
-    try {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', 
-        headers: getHeaders(),
-        body: JSON.stringify({ 
-          model, 
-          max_tokens: 10, 
-          messages: [{ role: 'user', content: 'ok' }] 
-        })
-      });
-      const body = await r.json();
-      
-      if (r.ok) {
-        // Store working model for reuse
-        window._workingModel = model;
-        st.textContent = '✅ Clé valide ! (' + model + ')';
-        document.getElementById('apiBanner').classList.add('ok');
-        return;
-      } else {
-        // Show full error details
-        const errMsg = body?.error?.message || JSON.stringify(body);
-        const errType = body?.error?.type || '';
-        
-        if (r.status === 401) {
-          st.textContent = '❌ Clé invalide ou expirée (401) — ' + errMsg;
-          return; // No point trying other models
-        } else if (r.status === 400) {
-          st.textContent = '⚠ Modèle ' + model + ' → 400: ' + errMsg.slice(0,80);
-          // Try next model
-          continue;
-        } else {
-          st.textContent = '❌ Erreur ' + r.status + ': ' + errMsg.slice(0, 80);
-          return;
-        }
-      }
-    } catch (e) {
-      st.textContent = '❌ Connexion impossible: ' + e.message + ' (CORS? Ouvrez depuis un serveur web)';
-      return;
-    }
-  }
-  st.textContent = '❌ Tous les modèles en erreur 400 — vérifiez votre clé API';
-}
-
 // =============================================
 // DATA & STATE
 // =============================================
