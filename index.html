@@ -478,19 +478,6 @@
 </div>
 
 
-
-  <!-- Gestion des lots -->
-  <div class="card" style="margin-top:16px;">
-    <div class="card-title">🏷️ Lots disponibles</div>
-    <p style="font-size:12px;color:var(--gris-text);margin-bottom:10px;">Ces lots apparaissent dans les menus déroulants du tableau. Modifiez selon votre projet.</p>
-    <div id="lotsListEdit" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="text" id="newLotInput" placeholder="Nouveau lot..." style="flex:1;max-width:200px;">
-      <button class="btn btn-primary btn-sm" onclick="ajouterLot()">+ Ajouter</button>
-      <button class="btn btn-ghost btn-sm" onclick="resetLots()">Réinitialiser</button>
-    </div>
-  </div>
-
 <!-- ============ TAB NOTICES ============ -->
 <div class="panel" id="panel-notices" style="display:none;">
 
@@ -670,6 +657,28 @@
     </div>
     <div id="queueList"></div>
   </div>
+</div>
+
+<!-- ============ TAB AFFECTATION ============ -->
+<div class="panel" id="panel-affectation" style="display:none;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;">
+    <div class="info-bar" style="flex:1;margin-bottom:0;">
+      🎯 Affectez les critères spéciaux à vos locaux. Les locaux sont groupés automatiquement. Cochez et cliquez "Appliquer".
+    </div>
+    <button class="btn btn-success" onclick="showTab('tableau')" style="white-space:nowrap;padding:10px 20px;font-size:14px;font-weight:600;">
+      📋 Tableau des Portes →
+    </button>
+  </div>
+
+  <div id="affNoData" style="text-align:center;padding:60px;color:var(--gris-text);font-size:13px;">
+    <div style="font-size:48px;margin-bottom:16px;">📭</div>
+    <p>Aucune porte dans le tableau.</p>
+    <p style="margin-top:8px;">Importez d'abord des portes dans l'onglet ③, puis cliquez "📋 Tableau des Portes →".</p>
+  </div>
+
+  <div id="affectationPanels" style="display:flex;flex-direction:column;gap:16px;"></div>
+
 </div>
 
 <!-- ============ TAB 3: TABLEAU & EXPORT ============ -->
@@ -3037,9 +3046,9 @@ async function analyserNotices2() {
         <div style="font-weight:600;color:${color};font-size:13px;margin-bottom:8px;padding:7px 12px;background:${color}15;border-left:3px solid ${color};border-radius:0 4px 4px 0;">${title}</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr style="background:${color};color:white;">
-          <th style="padding:8px;text-align:left;width:24%;">Local 1</th>
-          <th style="padding:8px;text-align:center;width:5%;">↔</th>
-          <th style="padding:8px;text-align:left;width:24%;">Local 2</th>
+          <th style="padding:8px;text-align:left;width:18%;">Local 1</th>
+          <th style="padding:8px;text-align:center;width:4%;">↔</th>
+          <th style="padding:8px;text-align:left;width:18%;">Local 2</th>
           <th style="padding:8px;text-align:center;width:11%;">${valKey === 'feu' ? 'EI / E requis' : 'Acou. (dB)'}</th>
           <th style="padding:8px;text-align:center;width:6%;">FP</th>
           <th style="padding:8px;text-align:center;width:6%;">DAS</th>
@@ -3063,7 +3072,7 @@ async function analyserNotices2() {
             <td style="padding:8px;text-align:center;color:${ex.fp_requis?'#16a34a':'#94a3b8'};">${ex.fp_requis === true ? '✓' : ex.fp_requis === false ? '✗' : '—'}</td>
             <td style="padding:8px;text-align:center;color:${ex.das_ssi?'#ea580c':'#94a3b8'};">${ex.das_ssi === true ? '✓' : '—'}</td>
             <td style="padding:8px;text-align:center;font-size:11px;font-weight:600;color:#6366f1;">${ex.page_ref ? 'p.' + ex.page_ref : '—'}</td>
-            <td style="padding:8px;font-size:11px;color:#64748b;">${ex.note || ''}</td>
+            <td style="padding:8px;font-size:11px;color:#475569;">${ex.note ? `<em style="color:#64748b;">"${ex.note}"</em>` : ''}</td>
           </tr>`;
         }).join('') +
         '</tbody></table></div>';
