@@ -3361,6 +3361,36 @@ function normaliserLocalGroupe(local) {
 
 
 
+
+function toutAppliquerEtTableau() {
+  // Apply all checked sections
+  ['das','ca','antieff'].forEach(key => {
+    const div = document.getElementById('aff_locals_'+key);
+    if (div && div.querySelectorAll('input[data-local]:checked').length > 0) {
+      appliquerAffectation(key);
+    }
+  });
+  // Apply deco finitions
+  ['deco_s1','deco_s2','deco_plaque'].forEach(key => {
+    const div = document.getElementById('aff_locals_'+key);
+    if (div && div.querySelectorAll('input[data-local]:checked').length > 0) {
+      const finMap = {'deco_s1':'Stratifié type 1','deco_s2':'Stratifié type 2','deco_plaque':'Plaqué chêne'};
+      appliquerDecoFinition(finMap[key], key);
+    }
+  });
+  // Apply FP/charnières if checked
+  const fpCb = document.getElementById('aff_deco_fp_apply');
+  if (fpCb && fpCb.checked) appliquerFPDeco();
+  // Apply MIN Façade SAN if checked
+  const sanCb = document.getElementById('aff_facade_san');
+  if (sanCb && sanCb.checked) appliquerFacadesSAN();
+  // Apply all feu/acou notices
+  if (window._editableFeu && window._editableFeu.length) appliquerTousNotices('_editableFeu','feu');
+  if (window._editableAcou && window._editableAcou.length) appliquerTousNotices('_editableAcou','acou');
+  // Navigate to tableau
+  showTab('tableau');
+}
+
 function buildNoticeCard(dataKey, title, color, unit, sortedLocals) {
   window[dataKey] = window[dataKey] || (window._noticesExtracted||[]).filter(function(e){ return unit==='feu'?e.feu:e.acoustique_db; }).map(function(e){ return Object.assign({},e); });
   var data = window[dataKey] || [];
@@ -3499,7 +3529,7 @@ function genererListeLocaux() {
             onchange="this.closest('label').style.background=this.checked?'rgba(245,242,184,0.5)':'#f1f5f9'">
           ${local}
         </label>
-        <button onclick="document.getElementById('dir_${sectionKey}_${safeKey}').classList.toggle('open');event.stopPropagation();"
+        <button onclick="(function(id){var el=document.getElementById(id);if(!el)return;var isOpen=el.classList.contains('open');document.querySelectorAll('.dir-popover.open').forEach(function(p){p.classList.remove('open');});if(!isOpen)el.classList.add('open');})('dir_${sectionKey}_${safeKey}');event.stopPropagation();"
           style="background:${bg};border:1px solid ${border};border-left:1px solid rgba(0,0,0,0.1);border-radius:0 20px 20px 0;padding:3px 7px;font-size:10px;cursor:pointer;color:#64748b;">▾</button>
       </span>
       <div class="dir-popover" id="dir_${sectionKey}_${safeKey}">
@@ -3603,6 +3633,8 @@ function genererListeLocaux() {
   </div>`);
 
   container.innerHTML = sections.join('');
+  const massBtn = document.getElementById('affBtnMasse');
+  if (massBtn) massBtn.style.display = 'block';
 }
 
 function isPreChecked(key, local) {
@@ -3654,6 +3686,14 @@ function appliquerAffectation(key) {
   renderTable(); renderStats();
   alert(count + " porte(s) mise(s) à jour !");
 }
+
+
+// Close direction popovers when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest || !e.target.closest('.local-badge-wrap')) {
+    document.querySelectorAll('.dir-popover.open').forEach(function(p){ p.classList.remove('open'); });
+  }
+});
 
 // =============================================
 // INIT
