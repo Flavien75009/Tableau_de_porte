@@ -3227,54 +3227,194 @@ function normaliserLocalGroupe(local) {
   return local.trim().replace(/\s+\d+.*$/, '').replace(/[-_]\d+.*$/, '').trim();
 }
 
+
+function buildSimpleSection(key, title, desc, sortedLocals, localBadge, isPreChecked) {
+  return `<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">${title}</div>
+        <p style="font-size:11px;color:var(--gris-text);font-style:italic;">${desc}</p>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="appliquerAffectation('${key}')">Appliquer</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',true)">Tout</button>
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',false)">Aucun</button>
+    </div>
+    <div id="aff_locals_${key}" style="display:flex;flex-wrap:wrap;gap:4px;">
+      ${sortedLocals.map(l => localBadge(key, l, isPreChecked(key, l))).join('')}
+    </div>
+  </div>`;
+}
+
 function genererListeLocaux() {
   const noData = document.getElementById('affNoData');
   const container = document.getElementById('affectationPanels');
-  if (!tableRows.length) { 
-    if(noData) noData.style.display='block';
-    if(container) container.innerHTML='';
-    return; 
+  if (!tableRows.length) {
+    if (noData) noData.style.display = 'block';
+    if (container) container.innerHTML = '';
+    return;
   }
-  if(noData) noData.style.display='none';
-  
-  // Collect all unique grouped locals
-  const allLocals = new Set();
+  if (noData) noData.style.display = 'none';
+
+  // Deduplicated grouped locals (case-insensitive)
+  const localMap = new Map();
   tableRows.forEach(r => {
-    if (r.local_int) allLocals.add(normaliserLocalGroupe(r.local_int));
-    if (r.local_ext) allLocals.add(normaliserLocalGroupe(r.local_ext));
+    [r.local_int, r.local_ext].forEach(l => {
+      if (!l) return;
+      const g = normaliserLocalGroupe(l);
+      if (g.length < 2) return;
+      const k = g.toLowerCase();
+      if (!localMap.has(k)) localMap.set(k, g);
+    });
   });
-  const sortedLocals = [...allLocals].filter(l => l.length > 1).sort();
-  
+  const sortedLocals = [...localMap.values()].sort((a, b) => a.localeCompare(b, 'fr'));
   document.getElementById('cnt-affectation').textContent = sortedLocals.length;
-  
-  container.innerHTML = Object.entries(affectationConfig).map(([key, cfg]) => `
-    <div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.05);">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-        <div>
-          <div class="card-title" style="margin-bottom:4px;">${cfg.label}</div>
-          <p style="font-size:12px;color:var(--gris-text);font-style:italic;">${cfg.desc}</p>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="appliquerAffectation('${key}')">
-          Appliquer aux portes sélectionnées
-        </button>
+
+  // Badge with ▾ direction selector showing ACTUAL adjacent locals
+  const localBadge = (sectionKey, local, precheck) => {
+    const safeKey = local.replace(/[^a-zA-Z0-9]/g, '_');
+    const adj = getAdjacentLocals(local);
+    const adjHtml = adj.length
+      ? adj.map(a => `<label style="display:flex;align-items:center;gap:5px;margin-bottom:3px;cursor:pointer;font-size:11px;">
+          <input type="checkbox" data-dir="${a.display}" checked>
+          <span>${a.display}</span><span style="color:#94a3b8;font-size:10px;">(${a.count})</span>
+        </label>`).join('')
+      : '<em style="font-size:11px;color:#94a3b8;">—</em>';
+    const bg = precheck ? 'rgba(245,242,184,0.5)' : '#f1f5f9';
+    const border = precheck ? '#c8c46a' : 'var(--gris-border)';
+    return `<div class="local-badge-wrap">
+      <span style="display:inline-flex;align-items:stretch;margin:2px;border-radius:20px;overflow:visible;">
+        <label style="display:inline-flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};border-radius:20px 0 0 20px;padding:4px 8px;font-size:12px;cursor:pointer;border-right:none;white-space:nowrap;">
+          <input type="checkbox" data-local="${local}" ${precheck ? 'checked' : ''}
+            onchange="this.closest('label').style.background=this.checked?'rgba(245,242,184,0.5)':'#f1f5f9'">
+          ${local}
+        </label>
+        <button onclick="document.getElementById('dir_${sectionKey}_${safeKey}').classList.toggle('open');event.stopPropagation();"
+          style="background:${bg};border:1px solid ${border};border-left:1px solid rgba(0,0,0,0.1);border-radius:0 20px 20px 0;padding:3px 7px;font-size:10px;cursor:pointer;color:#64748b;">▾</button>
+      </span>
+      <div class="dir-popover" id="dir_${sectionKey}_${safeKey}">
+        <div style="font-weight:600;font-size:11px;color:var(--bleu);margin-bottom:6px;">Vers quel local ?</div>
+        <label style="display:flex;align-items:center;gap:5px;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:11px;">
+          <input type="checkbox" data-dir-all="1" checked
+            onchange="this.closest('.dir-popover').querySelectorAll('[data-dir]').forEach(i=>i.checked=this.checked)">
+          <em style="color:#64748b;">Tous locaux adjacents</em>
+        </label>
+        ${adjHtml}
       </div>
-      ${key === 'deco' ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:10px;cursor:pointer;"><input type="checkbox" id="aff_deco_hinges" checked> Appliquer charnières invisibles + FP encastrés si FP obligatoire</label>` : ''}
-      ${key === 'finition' ? `<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;font-size:12px;"><label>Finition :</label><select id="aff_finition_val" style="padding:4px 8px;border:1px solid var(--gris-border);border-radius:4px;font-size:12px;"><option>Stratifié type 1</option><option>Stratifié type 2</option><option>Plaqué chêne</option><option>Laqué RAL</option><option>A peindre</option></select></div>` : ''}
-      <div style="display:flex;gap:6px;margin-bottom:8px;">
-        <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',true)">Tout cocher</button>
-        <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',false)">Tout décocher</button>
-      </div>
-      <div id="aff_locals_${key}" style="display:flex;flex-wrap:wrap;gap:6px;">
-        ${sortedLocals.map(local => {
-          const precheck = isPreChecked(key, local);
-          return `<label style="display:inline-flex;align-items:center;gap:5px;background:${precheck?'#dbeafe':'#f1f5f9'};border:1px solid ${precheck?'#93c5fd':'var(--gris-border)'};border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;">
-            <input type="checkbox" data-local="${local}" ${precheck?'checked':''} style="cursor:pointer;">
-            ${local}
-          </label>`;
-        }).join('')}
-      </div>
+    </div>`;
+  };
+
+  const isPreChecked = (key, local) => {
+    const l = local.toLowerCase();
+    const map = {
+      das: ['escalier','sas','parking','circulation','hall','couloir'],
+      ca: ['accueil','direction','r\u00e9union','hall','entr\u00e9e'],
+      antieff: ['entr\u00e9e','hall','accueil','parking','ext\u00e9rieur'],
+      deco_s1: ['accueil','hall','direction','conf\u00e9rence','r\u00e9ception','showroom'],
+    };
+    return (map[key] || []).some(k => l.includes(k));
+  };
+
+  const sections = [];
+
+  // 0. MIN Fa\u00e7ade SAN
+  sections.push(`<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div class="card-title" style="margin-bottom:0;">\uD83D\uDEAA MIN Fa\u00e7ade SAN — Sanitaires</div>
+      <button class="btn btn-primary btn-sm" onclick="appliquerFacadesSAN()">Appliquer</button>
     </div>
-  `).join('');
+    <label style="display:flex;align-items:center;gap:10px;font-size:12px;cursor:pointer;padding:8px;background:rgba(245,242,184,0.1);border-radius:6px;">
+      <input type="checkbox" id="aff_facade_san">
+      <span>Les portes entre <strong>SAS sanitaires / zone d'aisance</strong> et <strong>cabines WC / douche / PMR</strong> sont en lot <strong>MIN Fa\u00e7ade SAN</strong></span>
+    </label>
+  </div>`);
+
+  // 1. Strat 1
+  sections.push(`<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">\u2728 Stratifié type 1 — locaux d\u00e9coratifs</div>
+        <p style="font-size:11px;color:var(--gris-text);font-style:italic;">Se r\u00e9f\u00e9rer aux plans de d\u00e9coration et valider avec l\u2019Architecte</p>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="appliquerDecoFinition('Stratifié type 1','deco_s1')">Appliquer Strat 1</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('deco_s1',true)">Tout</button>
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('deco_s1',false)">Aucun</button>
+    </div>
+    <div id="aff_locals_deco_s1" style="display:flex;flex-wrap:wrap;gap:4px;">
+      ${sortedLocals.map(l => localBadge('deco_s1', l, isPreChecked('deco_s1', l))).join('')}
+    </div>
+  </div>`);
+
+  // 2. Strat 2
+  sections.push(`<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">\u2728 Stratifié type 2 — locaux d\u00e9coratifs</div>
+        <p style="font-size:11px;color:var(--gris-text);font-style:italic;">Se r\u00e9f\u00e9rer aux plans de d\u00e9coration et valider avec l\u2019Architecte</p>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="appliquerDecoFinition('Stratifié type 2','deco_s2')">Appliquer Strat 2</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('deco_s2',true)">Tout</button>
+      <button class="btn btn-ghost btn-sm" onclick="selectAllAff('deco_s2',false)">Aucun</button>
+    </div>
+    <div id="aff_locals_deco_s2" style="display:flex;flex-wrap:wrap;gap:4px;">
+      ${sortedLocals.map(l => localBadge('deco_s2', l, false)).join('')}
+    </div>
+  </div>`);
+
+  // 3. DAS
+  sections.push(buildSimpleSection('das','\uD83D\uDEA8 DAS / SSI','Se r\u00e9f\u00e9rer aux plans de SSI — valider avec le BE \u00c9lectricit\u00e9',sortedLocals,localBadge,isPreChecked));
+
+  // 4. CA
+  sections.push(buildSimpleSection('ca','\uD83D\uDD11 Contr\u00f4le d\u2019acc\u00e8s','Se r\u00e9f\u00e9rer aux plans de CFA — valider avec le BE \u00c9lectricit\u00e9',sortedLocals,localBadge,isPreChecked));
+
+  // 5. Anti-effraction
+  sections.push(buildSimpleSection('antieff','\uD83D\uDEE1\uFE0F Anti-effraction','Se r\u00e9f\u00e9rer au programme de l\u2019op\u00e9ration',sortedLocals,localBadge,isPreChecked));
+
+  // 6. Feu notices
+  const noticeFeuData = (window._noticesExtracted || []).filter(e => e.feu);
+  sections.push(`<div class="card" style="border-left:4px solid #dc2626;background:rgba(220,38,38,0.03);">
+    <div class="card-title" style="color:#dc2626;margin-bottom:8px;">\uD83D\uDD25 Exigences feu — Notice S\u00e9curit\u00e9</div>
+    ${!noticeFeuData.length
+      ? '<p style="font-size:12px;color:#94a3b8;font-style:italic;">Analysez les notices dans l\u2019onglet \u2461 pour voir les exigences feu ici.</p>'
+      : noticeFeuData.map(ex => `<div style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(220,38,38,0.04);border-radius:6px;margin-bottom:6px;border:1px solid rgba(220,38,38,0.1);">
+          <strong style="color:#dc2626;min-width:55px;font-size:14px;">${normalizeFeu(ex.feu)||'—'}</strong>
+          <span style="flex:1;font-size:12px;">${ex.local_from||'Tous locaux'}${ex.local_to?' \u2194 '+ex.local_to:''}</span>
+          <button class="btn btn-sm" style="background:#dc2626;color:white;font-size:11px;" onclick="appliquerFeuNotice('${(ex.local_from||'').replace(/'/g,"\\'")}','${(ex.local_to||'').replace(/'/g,"\\'")}','${normalizeFeu(ex.feu)||''}')">Appliquer</button>
+        </div>`).join('')
+    }
+  </div>`);
+
+  // 7. Acoustique notices
+  const noticeAcouData = (window._noticesExtracted || []).filter(e => e.acoustique_db);
+  sections.push(`<div class="card" style="border-left:4px solid #2563eb;background:rgba(37,99,235,0.03);">
+    <div class="card-title" style="color:#2563eb;margin-bottom:8px;">\uD83D\uDD0A Exigences acoustiques — Notice Acoustique</div>
+    ${!noticeAcouData.length
+      ? '<p style="font-size:12px;color:#94a3b8;font-style:italic;">Analysez les notices dans l\u2019onglet \u2461 pour voir les exigences acoustiques ici.</p>'
+      : noticeAcouData.map(ex => `<div style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(37,99,235,0.04);border-radius:6px;margin-bottom:6px;border:1px solid rgba(37,99,235,0.1);">
+          <strong style="color:#2563eb;min-width:55px;font-size:14px;">${ex.acoustique_db} dB</strong>
+          <span style="flex:1;font-size:12px;">${ex.local_from||'Tous locaux'}${ex.local_to?' \u2194 '+ex.local_to:''}</span>
+          <button class="btn btn-sm" style="background:#2563eb;color:white;font-size:11px;" onclick="appliquerAcouNotice('${(ex.local_from||'').replace(/'/g,"\\'")}','${(ex.local_to||'').replace(/'/g,"\\'")}',${ex.acoustique_db})">Appliquer</button>
+        </div>`).join('')
+    }
+  </div>`);
+
+  // 8. FP + Charni\u00e8res invisibles — EN DERNIER
+  sections.push(`<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
+    <div class="card-title" style="margin-bottom:6px;">\uD83E\uDE9E Charni\u00e8res invisibles + FP encastr\u00e9s</div>
+    <p style="font-size:12px;color:var(--gris-text);margin-bottom:12px;">S\u2019applique exactement aux m\u00eames portes que les finitions d\u00e9coratives s\u00e9lectionn\u00e9es ci-dessus (Strat 1 + Strat 2)</p>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer;padding:12px;background:rgba(245,242,184,0.15);border-radius:8px;border:1px solid rgba(197,191,120,0.3);">
+      <input type="checkbox" id="aff_deco_fp_apply" style="width:18px;height:18px;cursor:pointer;">
+      <span><strong>Appliquer charni\u00e8res invisibles + FP encastr\u00e9s</strong> aux portes d\u00e9coratives</span>
+    </label>
+    <button class="btn btn-primary" onclick="appliquerFPDeco()" style="margin-top:10px;">Appliquer aux portes d\u00e9coratives</button>
+  </div>`);
+
+  container.innerHTML = sections.join('');
 }
 
 function isPreChecked(key, local) {
