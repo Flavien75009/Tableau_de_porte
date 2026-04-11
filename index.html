@@ -53,7 +53,7 @@
   .tab.active .tab-count { background: var(--accent-light); color: var(--accent); }
 
   /* Panels */
-  .panel { display: none; padding: 20px 24px; }
+  .panel { display: none; padding: 20px 24px; background: #f0f5ff; min-height: calc(100vh - 200px); }
   .panel.active { display: block; }
 
   /* Cards */
@@ -267,8 +267,12 @@
     <span>③ Pré-remplissage IA</span>
     <span class="tab-count" id="cnt-prefill">0</span>
   </div>
+  <div class="tab" onclick="showTab('affectation')" id="tab-affectation">
+    <span>④ Affectation</span>
+    <span class="tab-count" id="cnt-affectation">0</span>
+  </div>
   <div class="tab" onclick="showTab('tableau')" id="tab-tableau">
-    <span>④ Tableau & Export</span>
+    <span>⑤ Tableau & Export</span>
     <span class="tab-count" id="cnt-tableau">0</span>
   </div>
 </div>
@@ -963,7 +967,7 @@ document.getElementById('dateDoc').textContent = new Date().toLocaleDateString('
 // =============================================
 function showTab(tab) {
   if (tab === 'rules') { ouvrirParametres(); return; }
-  ['recon','notices','prefill','tableau'].forEach(t => {
+  ['recon','notices','prefill','affectation','tableau'].forEach(t => {
     const panel = document.getElementById('panel-'+t);
     const tabEl = document.getElementById('tab-'+t);
     if (panel) {
@@ -2409,15 +2413,40 @@ async function importerDirectTableau() {
       niveau: p.niveau || '',
       local_int: p.local_int || '',
       local_ext: p.local_ext || '',
-      lot: p.lot || full.lot || 'Menuiserie',
+      lot: p.lot || full.lot || (() => {
+        const localExt = (p.local_ext || '').toLowerCase();
+        const vantail = (full.vantail || pattern.vantail || '').toLowerCase();
+        // Exterior → Menuiserie extérieure
+        const extKeywords = ['extérieur','ext.','façade','terrasse','jardin','rue','parking ext','sortie','entrée principale'];
+        if (extKeywords.some(k => localExt.includes(k))) return 'Menuiserie extérieure';
+        // Metal vantail → Métallerie (serrurerie)
+        if (vantail === 'métallique' || vantail === 'metal') return 'Métallerie';
+        return 'Menuiserie';
+      })(),
       neuf_reno: full.neuf_reno || 'Porte neuve',
       nb_vantaux: full.nb_vantaux || pattern.nb_vantaux || 1,
       ouverture: full.type_ouverture || pattern.type_ouverture || 'Simple action',
       largeur: p.largeur || full.largeur || (pattern.nb_vantaux === 2 ? '900+200' : '900'),
       hauteur: p.hauteur || full.hauteur || '2040',
-      degre_feu: p.degre_feu || full.degre_feu || pattern.degre_feu || '',
-      acoustique: p.acoustique || full.acoustique || pattern.acoustique || '',
-      huisserie: full.huisserie || pattern.huisserie || 'Métallique',
+      degre_feu: (() => {
+        const raw = p.degre_feu || full.degre_feu || pattern.degre_feu || '';
+        // Check notice rules for this local type
+        const typeLocal2 = normaliserLocal(p.local_ext || p.local_int);
+        const noticeRule = currentRules.find(r => r.key && r.key.toLowerCase() === typeLocal2.toLowerCase());
+        const noticeFeu = noticeRule ? (noticeRule.feu_notice || noticeRule.feu_base) : null;
+        return normalizeFeu(raw || noticeFeu || '');
+      })(),
+      acoustique: (() => {
+        const raw = p.acoustique || full.acoustique || pattern.acoustique || '';
+        const typeLocal2 = normaliserLocal(p.local_ext || p.local_int);
+        const noticeRule = currentRules.find(r => r.key && r.key.toLowerCase() === typeLocal2.toLowerCase());
+        const noticeAcou = noticeRule ? (noticeRule.acou_notice || noticeRule.acou_base) : null;
+        return raw || noticeAcou || '';
+      })(),
+      huisserie: full.huisserie || pattern.huisserie || (() => {
+        const niv = (p.niveau || '').toLowerCase();
+        return (niv.startsWith('ss') || niv.startsWith('s-') || niv.startsWith('r-') || niv.includes('sous')) ? 'Métallique' : 'Bois';
+      })(),
       vantail: full.vantail || pattern.vantail || 'Bois',
       finition: full.finition || pattern.finition || '',
       das_ssi: full.das_ssi || pattern.das_ssi || '',
@@ -2504,26 +2533,33 @@ function loadNoticeFile(file, type) {
 
 const NOTICE_SYSTEM = `Tu es expert en sécurité incendie et acoustique du bâtiment (BTP France).
 On te fournit une ou deux notices techniques d'un projet (notice sécurité incendie et/ou notice acoustique).
-Ta mission : extraire les exigences de résistance au feu et d'acoustique pour chaque type de local.
+Ta mission : extraire les exigences de résistance au feu et d'acoustique pour chaque type de local/situation de porte.
+
+Pour chaque exigence trouvée, identifie :
+- local_from : le local côté provenance (ex: "Circulation", "Couloir", "Hall"). Si non précisé = null (sera affiché "Tous locaux")
+- local_to : le local côté destination/désigné (ex: "Escalier", "Local TGBT", "Chambre")
+- Si la notice dit "entre X et Y" → local_from=X, local_to=Y
+- Si la notice dit "accès à X" ou "porte de X" → local_from=null, local_to=X
 
 Réponds UNIQUEMENT en JSON valide — tableau d'objets, sans markdown :
 [
   {
-    "local_type": "string — nom du local/situation tel qu'il apparaît dans la notice",
+    "local_type": "string — description de la situation (ex: Accès escalier encloisonné)",
+    "local_from": "string|null — local côté provenance, null si non précisé",
+    "local_to": "string|null — local côté destination",
     "key_match": "string — parmi : LOCAL_GRAND|LOCAL_PETIT|RECOUPEMENT_CIRC|OPEN_SPACE|ESCALIER|BUREAUX_REUNION|SALLE_REUNION|CONF_DIRECTION|HALL|ACCES_SANITAIRE|CABINE_WC|VESTIAIRE|EAS|LOCAL_ELEC|LOCAL_CTA|LOCAL_TECHNIQUE|LOCAL_DECHETS|GAINE|SAS_ASCENSEUR|SAS_ASCENSEUR_SS|CHAMBRE|EAS_CIRC|COM_CHAMBRES|OFFICE|PALIERE_2F3F|PALIERE_4F|ESCALIER_3F|ESCALIER_4F|SS_ESCALIER|CAVE|LOCAL_POMPE|LOCAL_VELOS|AUTRE",
-    "feu": "string|null — ex: EI60, EI30, E30, E15, null",
-    "acoustique_db": "number|null — valeur en dB (RA ou DnT,A selon notice)",
-    "acoustique_type": "string|null — RA|DnT,A|Rw|DnT,A,tr",
+    "feu": "string|null — en notation E ou EI uniquement : EI120, EI60, EI30, E60, E30, E15. PF 1h → EI60, CF 1h → EI60, PF ½h → E30",
+    "acoustique_db": "number|null — valeur en dB",
+    "acoustique_type": "string|null — RA|DnT,A|Rw",
     "fp_requis": "boolean|null",
     "detalonnage_interdit": "boolean|null",
     "das_ssi": "boolean|null",
     "source": "secu|acou|both",
-    "page_ref": "string|null — numéro de page ou section",
-    "note": "string|null — observation importante"
+    "page_ref": "string|null — numéro de page exact dans la notice",
+    "note": "string|null"
   }
 ]
-Si une information n'est pas mentionnée dans la notice, mets null.
-Extrait TOUS les types de locaux mentionnés, même partiellement.`;
+Extrait TOUTES les situations mentionnées. Pour chaque CF/PF traduit bien en EI/E.`;
 
 async function analyserNotices() {
   const btn = document.getElementById('btnAnalyseNotices');
@@ -3021,6 +3057,136 @@ async function analyserNotices2() {
     status.textContent = '❌ ' + e.message;
   }
   btn.disabled = false; spin.style.display = 'none';
+}
+
+
+function normalizeFeu(v) {
+  if (!v) return v;
+  const s = String(v).trim();
+  const map = {
+    'CF 2h': 'EI120', 'PF 2h': 'EI120', '2h': 'EI120',
+    'CF 1h30': 'EI90', 'PF 1h30': 'EI90', '1h30': 'EI90',
+    'CF 1h': 'EI60', 'PF 1h': 'EI60', '1h': 'EI60',
+    'CF 1/2h': 'E30', 'PF 1/2h': 'E30', 'CF ½h': 'E30', 'PF ½h': 'E30', '½h': 'E30', '1/2h': 'E30',
+    'CF 30': 'E30', 'EI 30': 'EI30', 'EI 60': 'EI60', 'EI 90': 'EI90', 'EI 120': 'EI120',
+    'E 30': 'E30', 'E 60': 'E60',
+  };
+  return map[s] || s;
+}
+
+
+// ── CONSOLE D'AFFECTATION ──
+let affectationConfig = {
+  deco: { label: "🎨 Portes décoratives", desc: "Se référer aux plans de décoration et valider avec l’Architecte", locals: [], applied: false, hinges: true },
+  das: { label: "🚨 DAS / SSI", desc: "Se référer aux plans de SSI et valider avec le BE Électricité", locals: [], applied: false },
+  ca: { label: "🔑 Contrôle d’accès", desc: "Se référer aux plans de CFA et valider avec le BE Électricité", locals: [], applied: false },
+  antieff: { label: "🛡️ Anti-effraction", desc: "Se référer au programme de l’opération", locals: [], applied: false },
+  finition: { label: "✨ Finition stratiïiée / décorative", desc: "Appliquer pour les locaux nobles (accueil, salles de réunion, direction)", locals: [], applied: false, value: "Stratiïié type 1" },
+};
+
+function normaliserLocalGroupe(local) {
+  // Remove numbers to group: "SDB 45" → "SDB", "Bureau 12" → "Bureau"
+  return local.trim().replace(/\s+\d+.*$/, '').replace(/[-_]\d+.*$/, '').trim();
+}
+
+function genererListeLocaux() {
+  if (!tableRows.length) { alert("Le tableau est vide. Importez des portes d'abord."); return; }
+  
+  // Collect all unique grouped locals
+  const allLocals = new Set();
+  tableRows.forEach(r => {
+    if (r.local_int) allLocals.add(normaliserLocalGroupe(r.local_int));
+    if (r.local_ext) allLocals.add(normaliserLocalGroupe(r.local_ext));
+  });
+  const sortedLocals = [...allLocals].filter(l => l.length > 1).sort();
+  
+  document.getElementById('cnt-affectation').textContent = sortedLocals.length;
+  
+  const container = document.getElementById('affectationPanels');
+  container.innerHTML = Object.entries(affectationConfig).map(([key, cfg]) => `
+    <div class="card" style="border-left:4px solid var(--accent);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+        <div>
+          <div class="card-title" style="margin-bottom:4px;">${cfg.label}</div>
+          <p style="font-size:12px;color:var(--gris-text);font-style:italic;">${cfg.desc}</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="appliquerAffectation('${key}')">
+          Appliquer aux portes sélectionnées
+        </button>
+      </div>
+      ${key === 'deco' ? `<label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:10px;cursor:pointer;"><input type="checkbox" id="aff_deco_hinges" checked> Appliquer charnières invisibles + FP encastrés si FP obligatoire</label>` : ''}
+      ${key === 'finition' ? `<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;font-size:12px;"><label>Finition :</label><select id="aff_finition_val" style="padding:4px 8px;border:1px solid var(--gris-border);border-radius:4px;font-size:12px;"><option>Stratifié type 1</option><option>Stratifié type 2</option><option>Plaqué chêne</option><option>Laqué RAL</option><option>A peindre</option></select></div>` : ''}
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',true)">Tout cocher</button>
+        <button class="btn btn-ghost btn-sm" onclick="selectAllAff('${key}',false)">Tout décocher</button>
+      </div>
+      <div id="aff_locals_${key}" style="display:flex;flex-wrap:wrap;gap:6px;">
+        ${sortedLocals.map(local => {
+          const precheck = isPreChecked(key, local);
+          return `<label style="display:inline-flex;align-items:center;gap:5px;background:${precheck?'#dbeafe':'#f1f5f9'};border:1px solid ${precheck?'#93c5fd':'var(--gris-border)'};border-radius:20px;padding:4px 10px;font-size:12px;cursor:pointer;">
+            <input type="checkbox" data-local="${local}" ${precheck?'checked':''} style="cursor:pointer;">
+            ${local}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function isPreChecked(key, local) {
+  const l = local.toLowerCase();
+  if (key === 'das') return ['escalier','sas','parking','circulation','hall'].some(k => l.includes(k));
+  if (key === 'ca') return ['accueil','direction','salle de réunion','hall','entrée'].some(k => l.includes(k));
+  if (key === 'deco') return ['accueil','hall','direction','showroom','réception'].some(k => l.includes(k));
+  if (key === 'finition') return ['accueil','hall','direction','conférence','réunion','showroom'].some(k => l.includes(k));
+  if (key === 'antieff') return ['entrée','hall','accueil','parking'].some(k => l.includes(k));
+  return false;
+}
+
+function selectAllAff(key, val) {
+  const div = document.getElementById('aff_locals_'+key);
+  if (!div) return;
+  div.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.checked = val;
+    cb.closest('label').style.background = val ? '#dbeafe' : '#f1f5f9';
+    cb.closest('label').style.borderColor = val ? '#93c5fd' : 'var(--gris-border)';
+  });
+}
+
+function appliquerAffectation(key) {
+  const div = document.getElementById('aff_locals_'+key);
+  if (!div) return;
+  const checkedLocals = [...div.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.dataset.local.toLowerCase());
+  if (!checkedLocals.length) { alert("Cochez au moins un local."); return; }
+  
+  let count = 0;
+  tableRows.forEach(r => {
+    const liGroup = normaliserLocalGroupe(r.local_int || '').toLowerCase();
+    const leGroup = normaliserLocalGroupe(r.local_ext || '').toLowerCase();
+    const match = checkedLocals.some(l => liGroup.includes(l) || leGroup.includes(l) || l.includes(liGroup) || l.includes(leGroup));
+    if (!match) return;
+    
+    if (key === 'das') { r.das_ssi = 'Oui'; count++; }
+    else if (key === 'ca') { r.controle_acces = r.controle_acces || 'CA - badge'; count++; }
+    else if (key === 'antieff') { r.notes = (r.notes ? r.notes + ' | ' : '') + 'Anti-effraction — voir programme'; count++; }
+    else if (key === 'deco') {
+      const useInvisible = document.getElementById('aff_deco_hinges')?.checked;
+      if (useInvisible) {
+        r.ferrage = 'Charnières invisibles';
+        if (r.ferme_porte) r.ferme_porte = 'FP encastré';
+      }
+      r.notes = (r.notes ? r.notes + ' | ' : '') + 'Porte déco — voir plans décoration + Architecte';
+      count++;
+    }
+    else if (key === 'finition') {
+      r.finition = document.getElementById('aff_finition_val')?.value || 'Stratifié type 1';
+      count++;
+    }
+  });
+  
+  renderTable();
+  renderStats();
+  alert(count + " porte(s) mise(s) à jour !");
 }
 
 // =============================================
