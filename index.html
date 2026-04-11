@@ -195,6 +195,13 @@
   .btn-settings { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.2); color:white; padding:6px 10px; border-radius:var(--radius); cursor:pointer; font-size:16px; line-height:1; transition:all .15s; }
   .btn-settings:hover { background:rgba(255,255,255,0.2); }
 
+
+  .col-map-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .col-map-row { display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--gris-bg); border-radius:6px; font-size:12px; }
+  .col-map-label { font-weight:500; color:var(--bleu); min-width:120px; }
+  .col-map-select { flex:1; padding:4px 8px; border:1px solid var(--gris-border); border-radius:4px; font-size:12px; }
+  .col-preview { font-size:11px; color:var(--gris-text); margin-top:4px; font-style:italic; }
+
   @media (max-width: 900px) {
     .form-grid-3, .form-grid-4 { grid-template-columns: 1fr 1fr; }
     .detail-grid { grid-template-columns: 1fr 1fr; }
@@ -367,7 +374,7 @@
 
   <!-- RECONNAISSANCE DE PLANS (IA) -->
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">🗺️ Reconnaissance de plan par IA <span style="font-size:11px;font-weight:400;color:var(--gris-text);">(clé API requise)</span></div>
+    <div class="card-title">🗺️ Reconnaissance portes sur plans <span style="font-size:11px;font-weight:400;color:var(--gris-text);">(clé API requise)</span></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
       <div>
         <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInputPlan').click()" 
@@ -991,6 +998,34 @@ function processFile(file) {
   reader.readAsDataURL(file);
 }
 
+// Robust JSON parser that recovers partial responses
+function parsePartialJSON(text) {
+  const clean = text.replace(/```json|```/g,'').trim();
+  // Try direct parse first
+  try { return JSON.parse(clean); } catch(e) {}
+  // Try to find and extract all complete objects using regex
+  const objects = [];
+  const objRegex = /\{[^{}]*\}/g;
+  let match;
+  while ((match = objRegex.exec(clean)) !== null) {
+    try { 
+      const obj = JSON.parse(match[0]);
+      if (obj.repere || obj.local_ext || obj.niveau) objects.push(obj);
+    } catch(e) {}
+  }
+  if (objects.length > 0) return objects;
+  // Last resort: find last }, and close the array
+  const lastBrace = clean.lastIndexOf('},');
+  if (lastBrace > 0) {
+    try { return JSON.parse(clean.slice(0, lastBrace+1) + ']'); } catch(e) {}
+  }
+  const lastBrace2 = clean.lastIndexOf('}');
+  if (lastBrace2 > 0) {
+    try { return JSON.parse(clean.slice(0, lastBrace2+1) + ']'); } catch(e) {}
+  }
+  throw new Error('Impossible de lire la réponse IA. Le PDF est peut-être trop volumineux — essayez de découper par niveau.');
+}
+
 async function lancerRecoIA() {
   if(!planFileData) return;
   const btn = document.getElementById('btnRecoIA');
@@ -1029,14 +1064,14 @@ ${instruct ? '\nInstructions supplémentaires : '+instruct : ''}`;
             {inline_data:{mime_type:'application/pdf',data:planFileData}},
             {text: prompt}
           ]}],
-          generationConfig:{maxOutputTokens:4000,temperature:0.1}
+          generationConfig:{maxOutputTokens:8192,temperature:0.1}
         })
       });
       const d = await r.json();
       if(!r.ok) throw new Error(d?.error?.message || r.status);
       const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
       const clean = text.replace(/```json|```/g,'').trim();
-      portes = JSON.parse(clean);
+      portes = parsePartialJSON(clean);
     } else {
       // Claude
       const resp = await fetch('https://api.anthropic.com/v1/messages',{
@@ -2019,9 +2054,9 @@ async function processImportFile(file) {
           return -1;
         };
         const colNiv = getCol(["nom d'étage", 'étage','niveau']);
-        const colDe = getCol(['de ','de\n','de\r']);
+        const colDe = getCol(['de ','de\n','de\r','de']);
         // "à" with accent
-        const colA = hdr.findIndex(h => h && String(h).trim().toLowerCase() === '\u00e0');
+        const colA = hdr.findIndex(h => h && (String(h).trim().toLowerCase() === '\u00e0' || String(h).trim().toLowerCase() === 'à' || String(h).trim().toLowerCase() === 'a'));
         const colLot = getCol(['lot']);
         const colType = getCol(['type']);
         const colId = getCol(['id de','id\n','repère','numéro','reference']);
@@ -2061,11 +2096,17 @@ async function processImportFile(file) {
           const feuVal = colFeu >= 0 ? String(row[colFeu] || '') : '';
           const caVal = colCA >= 0 ? String(row[colCA] || '') : '';
           
+          // Clean renovation status wrongly placed in local fields
+          const RENO_VALS_REV = ['nouveau','existant','neuf','conservé','replaquer','repeindre'];
+          let cleanLocalInt = localInt === '-' ? '' : localInt;
+          let cleanLocalExt = localExt === '-' ? '' : localExt;
+          if (RENO_VALS_REV.includes(cleanLocalInt.toLowerCase())) cleanLocalInt = '';
+          if (RENO_VALS_REV.includes(cleanLocalExt.toLowerCase())) cleanLocalExt = '';
           result.push({
             repere,
             niveau: colNiv >= 0 ? String(row[colNiv] || '') : '',
-            local_int: localInt === '-' ? '' : localInt,
-            local_ext: localExt === '-' ? '' : localExt,
+            local_int: cleanLocalInt,
+            local_ext: cleanLocalExt,
             lot: colLot >= 0 ? String(row[colLot] || 'Menuiserie') : 'Menuiserie',
             neuf_reno: (() => {
               const v = colEtat >= 0 ? String(row[colEtat] || '').toLowerCase() : '';
@@ -2087,10 +2128,16 @@ async function processImportFile(file) {
         }
       }
       
-      // Standard format - send to Claude API
-      const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
-      const snippet = csv.slice(0, 5000);
-      await analyserAvecClaude(snippet, file.name, 'excel');
+      // Standard format — show column mapping UI before sending to AI
+      const allRows2 = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      const headers2 = (allRows2[0] || []).map(String);
+      if (headers2.length > 0) {
+        loading.style.display = 'none';
+        afficherMappingColonnes(headers2, allRows2, file.name, ws);
+      } else {
+        const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
+        await analyserAvecClaude(csv.slice(0, 5000), file.name, 'excel');
+      }
     }
   } catch (e) {
     loading.style.display = 'none';
@@ -2651,6 +2698,150 @@ function buildRulesPromptSection() {
 
 
 
+
+let _mappingData = null;
+
+function afficherMappingColonnes(headers, rows, filename, ws) {
+  // Auto-detect best columns
+  const fields = [
+    {key:'repere', label:'Repère / N° porte', hints:['repère','numéro','repere','numero','ref','id porte','porte']},
+    {key:'niveau', label:'Niveau / Étage', hints:['niveau','étage','etage','floor','niv']},
+    {key:'local_int', label:'Local int (provenance)', hints:['de','local int','provenance','local 1','pièce 1','from']},
+    {key:'local_ext', label:'Local ext (destination)', hints:['à','vers','local ext','destination','local 2','pièce 2']},
+    {key:'lot', label:'Lot', hints:['lot','corps d\u2019\u00e9tat','corps detat']},
+    {key:'neuf_reno', label:'Neuf / Réno', hints:['état','etat','rénovation','renovation','neuf']},
+    {key:'largeur', label:'Largeur (mm)', hints:['largeur','larg','width']},
+    {key:'hauteur', label:'Hauteur (mm)', hints:['hauteur','haut','height']},
+    {key:'degre_feu', label:'Degré feu', hints:['feu','coupe-feu','fire','ei','pf']},
+    {key:'acoustique', label:'Acoustique (dB)', hints:['acoustique','acou','db','ra ']},
+  ];
+  
+  const headersLow = headers.map(h => h.toLowerCase());
+  const autoMap = {};
+  fields.forEach(f => {
+    let best = -1;
+    for (const hint of f.hints) {
+      const idx = headersLow.findIndex(h => h.includes(hint));
+      if (idx >= 0) { best = idx; break; }
+    }
+    autoMap[f.key] = best;
+  });
+  
+  _mappingData = {headers, rows, filename, ws, autoMap, fields};
+  
+  const grid = document.getElementById('colMappingGrid');
+  const opts = ['— Non mappé —', ...headers].map((h,i) => `<option value="${i-1}">${h}</option>`).join('');
+  grid.innerHTML = fields.map(f => `
+    <div class="col-map-row">
+      <span class="col-map-label">${f.label}</span>
+      <select class="col-map-select" id="map_${f.key}" onchange="updateColPreview()">
+        ${['— Non mappé —', ...headers].map((h,i) => `<option value="${i-1}" ${autoMap[f.key]===i-1?'selected':''}>${h}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+  
+  updateColPreview();
+  const modal = document.getElementById('colMappingModal');
+  modal.style.display = 'flex';
+}
+
+function updateColPreview() {
+  if (!_mappingData) return;
+  const {rows, fields} = _mappingData;
+  const preview = document.getElementById('colPreviewRows');
+  // Show first 3 data rows
+  const dataRows = rows.slice(1, 4);
+  if (!dataRows.length) return;
+  const lines = dataRows.map(row => {
+    const parts = fields
+      .map(f => {
+        const sel = document.getElementById('map_'+f.key);
+        if (!sel) return null;
+        const idx = parseInt(sel.value);
+        if (idx < 0) return null;
+        const val = String(row[idx] || '').trim().slice(0, 20);
+        return val ? `${f.label.split(' ')[0]}: ${val}` : null;
+      })
+      .filter(Boolean).slice(0, 5);
+    return parts.join(' | ');
+  }).filter(Boolean);
+  preview.innerHTML = '<strong>Aperçu :</strong><br>' + lines.join('<br>');
+}
+
+function fermerMappingModal() {
+  document.getElementById('colMappingModal').style.display = 'none';
+  _mappingData = null;
+}
+
+async function validerMappingColonnes() {
+  if (!_mappingData) return;
+  const {rows, fields} = _mappingData;
+  document.getElementById('colMappingModal').style.display = 'none';
+  
+  const loading = document.getElementById('importLoading');
+  const msg = document.getElementById('importLoadingMsg');
+  loading.style.display = 'block';
+  msg.textContent = 'Import en cours…';
+  
+  // Get mapping
+  const map = {};
+  fields.forEach(f => {
+    const sel = document.getElementById('map_'+f.key);
+    if (sel) map[f.key] = parseInt(sel.value);
+  });
+  
+  const RENO_VALS_M = ['nouveau','existant','neuf','conservé','replaquer','repeindre'];
+  const result = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every(v => !v)) continue;
+    
+    const get = (key) => map[key] >= 0 ? String(row[map[key]] || '').trim() : '';
+    
+    let localInt = get('local_int');
+    let localExt = get('local_ext');
+    let neufReno = get('neuf_reno');
+    
+    // Map neuf_reno values
+    const renoLow = neufReno.toLowerCase();
+    if (!neufReno || renoLow.includes('nouv') || renoLow.includes('neuf')) neufReno = 'Porte neuve';
+    else if (renoLow.includes('replaqu')) neufReno = 'Porte existante à replaquer';
+    else if (renoLow.includes('repeind')) neufReno = 'Porte existante à repeindre';
+    else if (renoLow.includes('exist') || renoLow.includes('conser')) neufReno = "Porte existante conservée en l'état";
+    else neufReno = 'Porte neuve';
+    
+    // Clean reno values accidentally in local fields
+    if (RENO_VALS_M.includes(localInt.toLowerCase())) localInt = '';
+    if (RENO_VALS_M.includes(localExt.toLowerCase())) localExt = '';
+    
+    if (!localInt && !localExt && !get('repere')) continue;
+    
+    const largRaw = get('largeur');
+    const hautRaw = get('hauteur');
+    
+    result.push({
+      repere: get('repere') || ('P-'+i),
+      niveau: get('niveau'),
+      local_int: localInt,
+      local_ext: localExt,
+      lot: get('lot') || 'Menuiserie',
+      neuf_reno: neufReno,
+      largeur: largRaw ? parseInt(largRaw) || '' : '',
+      hauteur: hautRaw ? parseInt(hautRaw) || '' : '',
+      degre_feu: get('degre_feu') || null,
+      acoustique: get('acoustique') ? parseInt(get('acoustique')) || null : null,
+    });
+  }
+  
+  loading.style.display = 'none';
+  if (result.length > 0) {
+    afficherImportPreview(result);
+  } else {
+    document.getElementById('importError').style.display = 'block';
+    document.getElementById('importError').textContent = 'Aucune porte trouvée avec ce mapping.';
+  }
+}
+
 // =============================================
 // INIT
 // =============================================
@@ -2714,5 +2905,22 @@ window.analyserPDFAvecClaude = async function(b64, filename) {
   }
 };
 </script>
+
+<!-- Column mapping modal -->
+<div id="colMappingModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:12px;padding:24px;width:680px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="font-size:15px;font-weight:600;color:var(--bleu);">🗂️ Correspondance des colonnes</h3>
+      <button onclick="fermerMappingModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gris-text);">✕</button>
+    </div>
+    <p style="font-size:12px;color:var(--gris-text);margin-bottom:16px;">Vérifiez que chaque champ correspond à la bonne colonne de votre fichier.</p>
+    <div id="colMappingGrid" class="col-map-grid"></div>
+    <div id="colPreviewRows" style="margin-top:12px;font-size:11px;color:var(--gris-text);background:var(--gris-bg);border-radius:6px;padding:10px;max-height:120px;overflow-y:auto;"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="fermerMappingModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="validerMappingColonnes()">✓ Importer avec ce mapping</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
