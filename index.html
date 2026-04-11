@@ -256,7 +256,7 @@
 <!-- Tabs -->
 <div class="tabs">
   <div class="tab active" onclick="showTab('recon')" id="tab-recon">
-    <span>① Saisie portes</span>
+    <span>① Reconnaissance & Saisie</span>
     <span class="tab-count" id="cnt-recon-tab">0</span>
   </div>
   <div class="tab" onclick="showTab('prefill')" id="tab-prefill">
@@ -1001,29 +1001,31 @@ function processFile(file) {
 // Robust JSON parser that recovers partial responses
 function parsePartialJSON(text) {
   const clean = text.replace(/```json|```/g,'').trim();
-  // Try direct parse first
+  // Direct parse
   try { return JSON.parse(clean); } catch(e) {}
-  // Try to find and extract all complete objects using regex
+  // Extract complete objects one by one with a state machine
   const objects = [];
-  const objRegex = /\{[^{}]*\}/g;
-  let match;
-  while ((match = objRegex.exec(clean)) !== null) {
-    try { 
-      const obj = JSON.parse(match[0]);
-      if (obj.repere || obj.local_ext || obj.niveau) objects.push(obj);
-    } catch(e) {}
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          const obj = JSON.parse(clean.slice(start, i+1));
+          if (obj && (obj.repere || obj.local_ext || obj.niveau)) objects.push(obj);
+        } catch(e) {}
+        start = -1;
+      }
+    }
   }
   if (objects.length > 0) return objects;
-  // Last resort: find last }, and close the array
-  const lastBrace = clean.lastIndexOf('},');
-  if (lastBrace > 0) {
-    try { return JSON.parse(clean.slice(0, lastBrace+1) + ']'); } catch(e) {}
-  }
-  const lastBrace2 = clean.lastIndexOf('}');
-  if (lastBrace2 > 0) {
-    try { return JSON.parse(clean.slice(0, lastBrace2+1) + ']'); } catch(e) {}
-  }
-  throw new Error('Impossible de lire la réponse IA. Le PDF est peut-être trop volumineux — essayez de découper par niveau.');
+  throw new Error('Réponse IA illisible. PDF trop volumineux — spécifiez un niveau précis dans le champ "Niveau".');
 }
 
 async function lancerRecoIA() {
@@ -1035,20 +1037,15 @@ async function lancerRecoIA() {
   const niveau = document.getElementById('recoNiveau').value || '';
   const instruct = document.getElementById('recoInstructions').value || '';
 
-  const prompt = `Tu es un expert BTP français en nomenclature de portes.
-Analyse ce document (plan PDF ou tableau de portes exporté Revit/AutoCAD).
+  // For large PDFs, only ask for essential fields to fit in token limit
+  const prompt = `Tu es expert BTP. Analyse ce plan/document et liste TOUTES les portes.
+JSON compact UNIQUEMENT (pas de markdown), chaque objet sur une ligne :
+[{"r":"repère","n":"niveau","i":"local intérieur","e":"local extérieur"}]
+${niveau ? 'Niveau: "'+niveau+'"' : ''}
+RÈGLE: "i" et "e" = noms de locaux UNIQUEMENT. Jamais "Nouveau","Existant","Neuf".
+${instruct ? instruct : ''}
+Réponds avec UNIQUEMENT le tableau JSON, rien d\'autre.`;
 
-RÈGLES IMPORTANTES :
-- "local_int" = NOM du local côté intérieur/provenance (ex: "Circulation", "Hall", "Bureau 12")
-- "local_ext" = NOM du local côté extérieur/destination (ex: "Escalier", "WC", "Chambre 11")
-- NE JAMAIS mettre "Nouveau", "Existant", "Neuf" dans local_int ou local_ext — ce sont des états de rénovation, pas des noms de locaux
-- "neuf_reno" = état : "Porte neuve" si Nouveau/Neuf, "Porte existante conservée en l'état" si Existant
-- "repere" = identifiant unique de la porte (ex: POR-100-001, P.RDC.01, PE_S2_01)
-- "niveau" = niveau du bâtiment. ${niveau ? `Niveau forcé: "${niveau}"` : 'Extrait du document'}
-
-Réponds UNIQUEMENT en JSON valide, sans markdown :
-[{"repere":"...","niveau":"...","local_int":"...","local_ext":"...","lot":"Menuiserie","neuf_reno":"Porte neuve","largeur":null,"hauteur":null,"degre_feu":null,"confiance":"haute"}]
-${instruct ? '\nInstructions supplémentaires : '+instruct : ''}`;
 
   try {
     let portes;
@@ -1088,18 +1085,18 @@ ${instruct ? '\nInstructions supplémentaires : '+instruct : ''}`;
       const text = data.content?.[0]?.text || '[]';
       portes = JSON.parse(text.replace(/```json|```/g,'').trim());
     }
-    // Post-process: fix "Nouveau"/"Existant" wrongly placed in local_int/local_ext
+    // Normalize compact format {"r","n","i","e"} to full format
     const RENO_VALS = ['nouveau','existant','neuf','conservé','replaquer','repeindre','porte neuve'];
     portes = portes.map(p => {
+      // Handle compact keys
+      if (p.r !== undefined) { p.repere = p.r; p.niveau = p.n; p.local_int = p.i; p.local_ext = p.e; }
       const liLow = (p.local_int||'').toLowerCase();
       const leLow = (p.local_ext||'').toLowerCase();
       if (RENO_VALS.some(v => liLow === v)) {
         if (!p.neuf_reno) p.neuf_reno = liLow.includes('exist') ? "Porte existante conservée en l'état" : "Porte neuve";
         p.local_int = '';
       }
-      if (RENO_VALS.some(v => leLow === v)) {
-        p.local_ext = '';
-      }
+      if (RENO_VALS.some(v => leLow === v)) { p.local_ext = ''; }
       return p;
     });
     afficherResultatsReco(portes);
@@ -2054,9 +2051,14 @@ async function processImportFile(file) {
           return -1;
         };
         const colNiv = getCol(["nom d'étage", 'étage','niveau']);
-        const colDe = getCol(['de ','de\n','de\r','de']);
+        // Exact match first for short column names
+        const colDe = (() => {
+          const exact = hdr.findIndex(h => h && String(h).trim().toLowerCase() === 'de');
+          if (exact >= 0) return exact;
+          return getCol(['de ','de\n','de\r']);
+        })();
         // "à" with accent
-        const colA = hdr.findIndex(h => h && (String(h).trim().toLowerCase() === '\u00e0' || String(h).trim().toLowerCase() === 'à' || String(h).trim().toLowerCase() === 'a'));
+        const colA = hdr.findIndex(h => h && ['à','a','\u00e0'].includes(String(h).trim().toLowerCase()));
         const colLot = getCol(['lot']);
         const colType = getCol(['type']);
         const colId = getCol(['id de','id\n','repère','numéro','reference']);
@@ -2128,7 +2130,7 @@ async function processImportFile(file) {
         }
       }
       
-      // Standard format — show column mapping UI before sending to AI
+      // Show column mapping UI for ALL unrecognized formats
       const allRows2 = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
       const headers2 = (allRows2[0] || []).map(String);
       if (headers2.length > 0) {
