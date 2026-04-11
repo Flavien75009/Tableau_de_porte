@@ -259,12 +259,16 @@
     <span>① Reconnaissance & Saisie</span>
     <span class="tab-count" id="cnt-recon-tab">0</span>
   </div>
+  <div class="tab" onclick="showTab('notices')" id="tab-notices">
+    <span>② Notices projet</span>
+    <span class="tab-count" id="cnt-notices">—</span>
+  </div>
   <div class="tab" onclick="showTab('prefill')" id="tab-prefill">
-    <span>② Pré-remplissage IA</span>
+    <span>③ Pré-remplissage IA</span>
     <span class="tab-count" id="cnt-prefill">0</span>
   </div>
   <div class="tab" onclick="showTab('tableau')" id="tab-tableau">
-    <span>③ Tableau & Export</span>
+    <span>④ Tableau & Export</span>
     <span class="tab-count" id="cnt-tableau">0</span>
   </div>
 </div>
@@ -482,6 +486,60 @@
       <button class="btn btn-ghost btn-sm" onclick="resetLots()">Réinitialiser</button>
     </div>
   </div>
+
+<!-- ============ TAB NOTICES ============ -->
+<div class="panel" id="panel-notices" style="display:none;">
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+    <!-- Upload notices -->
+    <div class="card">
+      <div class="card-title">📋 Notices projet</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div>
+          <label style="margin-bottom:6px;">Notice sécurité incendie</label>
+          <div id="uploadSecu2" class="upload-zone" style="padding:16px;cursor:pointer;" onclick="document.getElementById('fileSecu2').click()" ondragover="event.preventDefault()" ondrop="dropNotice2(event,'secu')">
+            <div id="labelSecu2" style="font-size:12px;color:var(--gris-text);">📄 Glisser ou cliquer</div>
+          </div>
+          <input type="file" id="fileSecu2" accept=".pdf" style="display:none" onchange="loadNotice2(event,'secu')">
+        </div>
+        <div>
+          <label style="margin-bottom:6px;">Notice acoustique</label>
+          <div id="uploadAcou2" class="upload-zone" style="padding:16px;cursor:pointer;" onclick="document.getElementById('fileAcou2').click()" ondragover="event.preventDefault()" ondrop="dropNotice2(event,'acou')">
+            <div id="labelAcou2" style="font-size:12px;color:var(--gris-text);">📄 Glisser ou cliquer</div>
+          </div>
+          <input type="file" id="fileAcou2" accept=".pdf" style="display:none" onchange="loadNotice2(event,'acou')">
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btnAnalyseNotices2" onclick="analyserNotices2()" disabled style="width:100%;">
+        🤖 Analyser les notices et extraire les exigences
+        <span id="spinNotices2" style="display:none" class="spinner"></span>
+      </button>
+      <div id="noticesStatus2" style="font-size:12px;margin-top:8px;color:var(--gris-text);"></div>
+    </div>
+    <!-- Info -->
+    <div class="card" style="background:var(--gris-bg);">
+      <div class="card-title">ℹ️ Comment ça marche</div>
+      <p style="font-size:12px;color:var(--gris-text);line-height:1.6;">L'IA analyse vos notices et extrait les <strong>exigences par type de local</strong> :</p>
+      <ul style="font-size:12px;color:var(--gris-text);margin-left:16px;margin-top:8px;line-height:1.8;">
+        <li>Degrés coupe-feu (EI30, EI60…)</li>
+        <li>Performances acoustiques (dB)</li>
+        <li>Ferme-porte, détalonnage interdit</li>
+        <li>DAS / SSI requis</li>
+      </ul>
+      <p style="font-size:12px;color:#2563eb;margin-top:10px;font-weight:500;">Ces exigences prennent le pas sur les valeurs par défaut lors du pré-remplissage.</p>
+    </div>
+  </div>
+
+  <!-- Tableau des exigences extraites -->
+  <div class="card" id="noticesResultCard" style="display:none;">
+    <div class="card-title" style="justify-content:space-between;">
+      <span>📊 Exigences extraites des notices</span>
+      <span id="noticesResultCount" style="font-size:12px;font-weight:400;color:var(--gris-text);"></span>
+    </div>
+    <div id="noticesResultContent"></div>
+  </div>
+
+</div>
 
 <!-- ============ TAB 2: PRE-REMPLISSAGE ============ -->
 <div class="panel" id="panel-prefill" style="display:none;">
@@ -905,8 +963,7 @@ document.getElementById('dateDoc').textContent = new Date().toLocaleDateString('
 // =============================================
 function showTab(tab) {
   if (tab === 'rules') { ouvrirParametres(); return; }
-  // Show/hide panels explicitly — no class ambiguity
-  ['recon','prefill','tableau'].forEach(t => {
+  ['recon','notices','prefill','tableau'].forEach(t => {
     const panel = document.getElementById('panel-'+t);
     const tabEl = document.getElementById('tab-'+t);
     if (panel) {
@@ -2842,6 +2899,128 @@ async function validerMappingColonnes() {
     document.getElementById('importError').style.display = 'block';
     document.getElementById('importError').textContent = 'Aucune porte trouvée avec ce mapping.';
   }
+}
+
+
+// ── NOTICES TAB ──
+function dropNotice2(e, type) { e.preventDefault(); const f = e.dataTransfer.files[0]; if(f) loadNoticeFile2(f, type); }
+
+function loadNotice2(e, type) { const f = e.target.files[0]; if(f) loadNoticeFile2(f, type); }
+
+function loadNoticeFile2(file, type) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const b64 = e.target.result.split(',')[1];
+    if (type === 'secu') {
+      noticeSecuB64 = b64;
+      document.getElementById('uploadSecu2').innerHTML = '<p style="font-size:11px;color:#166534;">✓ ' + file.name.slice(0,30) + '</p>';
+      // Sync with settings panel too
+      const us = document.getElementById('uploadSecu'); if(us) us.innerHTML = '<p style="font-size:11px;color:#166534;">✓ ' + file.name.slice(0,25) + '</p>';
+    } else {
+      noticeAcouB64 = b64;
+      document.getElementById('uploadAcou2').innerHTML = '<p style="font-size:11px;color:#166534;">✓ ' + file.name.slice(0,30) + '</p>';
+      const ua = document.getElementById('uploadAcou'); if(ua) ua.innerHTML = '<p style="font-size:11px;color:#166534;">✓ ' + file.name.slice(0,25) + '</p>';
+    }
+    if (noticeSecuB64 || noticeAcouB64) {
+      document.getElementById('btnAnalyseNotices2').disabled = false;
+      const btn = document.getElementById('btnAnalyseNotices'); if(btn) btn.disabled = false;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function analyserNotices2() {
+  const btn = document.getElementById('btnAnalyseNotices2');
+  const spin = document.getElementById('spinNotices2');
+  const status = document.getElementById('noticesStatus2');
+  btn.disabled = true; spin.style.display = 'inline-block';
+  status.textContent = 'Analyse en cours…';
+
+  const key = getApiKey();
+  if (!key) { status.textContent = '❌ Clé API manquante'; btn.disabled = false; spin.style.display='none'; return; }
+
+  try {
+    let rawText;
+    const model = window._workingGeminiModel || 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    
+    const gParts = [];
+    if (noticeSecuB64) {
+      gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeSecuB64 } });
+      gParts.push({ text: 'NOTICE SÉCURITÉ INCENDIE ci-dessus.' });
+    }
+    if (noticeAcouB64) {
+      gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeAcouB64 } });
+      gParts.push({ text: 'NOTICE ACOUSTIQUE ci-dessus.' });
+    }
+    gParts.push({ text: NOTICE_SYSTEM + '\nExtrait toutes les exigences feu et acoustique par type de local. JSON uniquement, sans markdown.' });
+
+    const resp = await fetch(url, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ contents:[{role:'user', parts: gParts}], generationConfig:{maxOutputTokens:8192,temperature:0.1} })
+    });
+    if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(`Gemini ${resp.status}: ${e?.error?.message}`); }
+    const data = await resp.json();
+    rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+
+    const clean = rawText.replace(/```json|```/g,'').trim();
+    const extracted = parsePartialJSON(clean);
+
+    // Apply to currentRules (notice values override base)
+    extracted.forEach(ex => {
+      const matchingRule = currentRules.find(r => {
+        const k = (r.key || '').toLowerCase();
+        const lt = (ex.local_type || '').toLowerCase();
+        const km = (ex.key_match || '').toLowerCase();
+        return k === km || lt.includes(k.replace(/_/g,' ')) || k.includes(lt.slice(0,6));
+      });
+      if (matchingRule) {
+        if (ex.feu) { matchingRule.feu_notice = ex.feu; matchingRule.source_feu = 'notice'; }
+        if (ex.acoustique_db) { matchingRule.acou_notice = ex.acoustique_db; matchingRule.source_acou = 'notice'; }
+        if (ex.fp_requis !== null && ex.fp_requis !== undefined) matchingRule.fp_base = ex.fp_requis;
+        if (ex.das_ssi !== null && ex.das_ssi !== undefined) matchingRule.das = ex.das_ssi;
+      }
+    });
+
+    // Display results
+    const card = document.getElementById('noticesResultCard');
+    const content = document.getElementById('noticesResultContent');
+    const count = document.getElementById('noticesResultCount');
+    card.style.display = 'block';
+    count.textContent = extracted.length + ' exigences trouvées';
+    document.getElementById('cnt-notices').textContent = extracted.length;
+
+    content.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+      '<thead><tr style="background:var(--bleu);color:white;">' +
+      '<th style="padding:8px;text-align:left;">Type de local</th>' +
+      '<th style="padding:8px;text-align:center;">Feu notice</th>' +
+      '<th style="padding:8px;text-align:center;">Acou. notice</th>' +
+      '<th style="padding:8px;text-align:center;">FP</th>' +
+      '<th style="padding:8px;text-align:center;">DAS</th>' +
+      '<th style="padding:8px;text-align:left;">Note</th>' +
+      '</tr></thead><tbody>' +
+      extracted.map((ex, i) => {
+        const bg = i % 2 === 0 ? 'white' : '#f8fafc';
+        return `<tr style="background:${bg};border-bottom:1px solid var(--gris-border);">
+          <td style="padding:8px;">${ex.local_type || '—'}</td>
+          <td style="padding:8px;text-align:center;font-weight:600;color:${ex.feu ? '#dc2626' : 'var(--gris-text)'};">${ex.feu || '—'}</td>
+          <td style="padding:8px;text-align:center;color:${ex.acoustique_db ? '#2563eb' : 'var(--gris-text)'};">${ex.acoustique_db ? ex.acoustique_db+' dB' : '—'}</td>
+          <td style="padding:8px;text-align:center;">${ex.fp_requis === true ? '✓' : ex.fp_requis === false ? '✗' : '—'}</td>
+          <td style="padding:8px;text-align:center;">${ex.das_ssi === true ? '✓' : '—'}</td>
+          <td style="padding:8px;font-size:11px;color:var(--gris-text);">${ex.note || ''}</td>
+        </tr>`;
+      }).join('') +
+      '</tbody></table>';
+
+    status.style.color = '#166534';
+    status.textContent = '✅ ' + extracted.length + ' exigences extraites et appliquées aux règles';
+    renderRulesTable();
+
+  } catch(e) {
+    status.style.color = '#dc2626';
+    status.textContent = '❌ ' + e.message;
+  }
+  btn.disabled = false; spin.style.display = 'none';
 }
 
 // =============================================
