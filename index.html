@@ -1674,10 +1674,58 @@ function ajouterLigneVide() {
 }
 
 
+
+function updateSectionStatus(key) {
+  const div = document.getElementById('aff_locals_' + key);
+  const ind = document.getElementById('status_' + key);
+  if (!div || !ind) return;
+  const all = [...div.querySelectorAll('input[data-local]')];
+  const checked = all.filter(cb => cb.checked);
+  if (checked.length === 0) {
+    ind.className = 'section-status status-none';
+    ind.textContent = '○ Aucun';
+  } else if (checked.length === all.length) {
+    ind.className = 'section-status status-all';
+    ind.textContent = '✓ Tous';
+  } else {
+    ind.className = 'section-status status-partial';
+    ind.textContent = '◑ ' + checked.length + '/' + all.length;
+  }
+}
+
 function toggleExpandRow(id) {
   const el = document.getElementById('expand_' + id);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+}
+
+
+
+function updateSectionStatus(key) {
+  const div = document.getElementById('aff_locals_' + key);
+  const ind = document.getElementById('status_' + key);
+  if (!div || !ind) return;
+  const all = [...div.querySelectorAll('input[data-local]')];
+  const checked = all.filter(cb => cb.checked);
+  if (checked.length === 0) {
+    ind.className = 'section-status status-none';
+    ind.textContent = '○ Aucun';
+  } else if (checked.length === all.length) {
+    ind.className = 'section-status status-all';
+    ind.textContent = '✓ Tous';
+  } else {
+    ind.className = 'section-status status-partial';
+    ind.textContent = '◑ ' + checked.length + '/' + all.length;
+  }
+}
+
+function toggleExpandRow(id) {
+  const el = document.getElementById('expand_' + id);
+  const btn = document.getElementById('expbtn_' + id);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'table-row';
+  if (btn) btn.textContent = open ? '▾' : '▴';
 }
 
 function supprimerLigne(id) {
@@ -1760,7 +1808,27 @@ function renderTable() {
       <td>${makeSelect(r.garniture,[...GARNITURES,''],'garniture',r._id)}</td>
       <td><input type="text" value="${r.butoir||''}" onchange="updateRow('${r._id}','butoir',this.value)" style="min-width:80px"></td>
       <td><input type="text" value="${r.notes||''}" onchange="updateRow('${r._id}','notes',this.value)" style="min-width:100px"></td>
-      <td><button class="btn btn-danger" onclick="supprimerLigne('${r._id}')">✕</button></td>
+      <td style="white-space:nowrap;">
+        <button onclick="toggleExpandRow('${r._id}')" title="Voir détails" 
+          style="background:none;border:1px solid var(--gris-border);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:12px;margin-right:3px;" 
+          id="expbtn_${r._id}">▾</button>
+        <button class="btn btn-danger btn-sm" onclick="supprimerLigne('${r._id}')">✕</button>
+      </td>
+    </tr>
+    <tr id="expand_${r._id}" style="display:none;background:#f8fafc;">
+      <td colspan="30" style="padding:10px 20px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:12px;">
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Ferrage</div><div style="font-weight:500;">${r.ferrage||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Serrure</div><div style="font-weight:500;">${r.serrure||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Cylindre</div><div style="font-weight:500;">${r.cylindre||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Ferme-porte</div><div style="font-weight:500;">${r.ferme_porte||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Garniture</div><div style="font-weight:500;">${r.garniture||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">DAS/SSI</div><div style="font-weight:500;color:${r.das_ssi==='Oui'?'#ea580c':'inherit'};">${r.das_ssi||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Contrôle accès</div><div style="font-weight:500;">${r.controle_acces||'—'}</div></div>
+          <div><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Butoir</div><div style="font-weight:500;">${r.butoir||'—'}</div></div>
+          <div style="grid-column:span 2;"><div style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">Notes</div><div style="font-weight:500;">${r.notes||'—'}</div></div>
+        </div>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -3447,35 +3515,14 @@ function genererListeLocaux() {
   // 5. Anti-effraction
   sections.push(buildSimpleSection('antieff','\uD83D\uDEE1\uFE0F Anti-effraction','Se r\u00e9f\u00e9rer au programme de l\u2019op\u00e9ration',sortedLocals,localBadge,isPreChecked));
 
-  // 6. Feu notices
-  const noticeFeuData = (window._noticesExtracted || []).filter(e => e.feu);
-  sections.push(`<div class="card" style="border-left:4px solid #dc2626;background:rgba(220,38,38,0.03);">
-    <div class="card-title" style="color:#dc2626;margin-bottom:8px;">\uD83D\uDD25 Exigences feu — Notice S\u00e9curit\u00e9</div>
-    ${!noticeFeuData.length
-      ? '<p style="font-size:12px;color:#94a3b8;font-style:italic;">Analysez les notices dans l\u2019onglet \u2461 pour voir les exigences feu ici.</p>'
-      : noticeFeuData.map(ex => `<div style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(220,38,38,0.04);border-radius:6px;margin-bottom:6px;border:1px solid rgba(220,38,38,0.1);">
-          <strong style="color:#dc2626;min-width:55px;font-size:14px;">${normalizeFeu(ex.feu)||'—'}</strong>
-          <span style="flex:1;font-size:12px;">${ex.local_from||'Tous locaux'}${ex.local_to?' \u2194 '+ex.local_to:''}</span>
-          <button class="btn btn-sm" style="background:#dc2626;color:white;font-size:11px;" onclick="appliquerFeuNotice('${(ex.local_from||'').replace(/'/g,"\\'")}','${(ex.local_to||'').replace(/'/g,"\\'")}','${normalizeFeu(ex.feu)||''}')">Appliquer</button>
-        </div>`).join('')
-    }
-  </div>`);
+  // 6. Feu + Acoustique notices — editable
+  window._editableFeu = window._editableFeu || (window._noticesExtracted||[]).filter(e=>e.feu).map(e=>({...e}));
+  window._editableAcou = window._editableAcou || (window._noticesExtracted||[]).filter(e=>e.acoustique_db).map(e=>({...e}));
 
-  // 7. Acoustique notices
-  const noticeAcouData = (window._noticesExtracted || []).filter(e => e.acoustique_db);
-  sections.push(`<div class="card" style="border-left:4px solid #2563eb;background:rgba(37,99,235,0.03);">
-    <div class="card-title" style="color:#2563eb;margin-bottom:8px;">\uD83D\uDD0A Exigences acoustiques — Notice Acoustique</div>
-    ${!noticeAcouData.length
-      ? '<p style="font-size:12px;color:#94a3b8;font-style:italic;">Analysez les notices dans l\u2019onglet \u2461 pour voir les exigences acoustiques ici.</p>'
-      : noticeAcouData.map(ex => `<div style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(37,99,235,0.04);border-radius:6px;margin-bottom:6px;border:1px solid rgba(37,99,235,0.1);">
-          <strong style="color:#2563eb;min-width:55px;font-size:14px;">${ex.acoustique_db} dB</strong>
-          <span style="flex:1;font-size:12px;">${ex.local_from||'Tous locaux'}${ex.local_to?' \u2194 '+ex.local_to:''}</span>
-          <button class="btn btn-sm" style="background:#2563eb;color:white;font-size:11px;" onclick="appliquerAcouNotice('${(ex.local_from||'').replace(/'/g,"\\'")}','${(ex.local_to||'').replace(/'/g,"\\'")}',${ex.acoustique_db})">Appliquer</button>
-        </div>`).join('')
-    }
-  </div>`);
+  sections.push(buildNoticeCard('_editableFeu', '\uD83D\uDD25 Exigences feu \u2014 \u00e9ditables', '#dc2626', 'feu', sortedLocals));
+  sections.push(buildNoticeCard('_editableAcou', '\uD83D\uDD0A Exigences acoustiques \u2014 \u00e9ditables', '#2563eb', 'acou', sortedLocals));
 
-  // 8. FP + Charni\u00e8res invisibles — EN DERNIER
+    // 8. FP + Charni\u00e8res invisibles — EN DERNIER
   sections.push(`<div class="card" style="border-left:4px solid #F5F2B8;background:rgba(245,242,184,0.06);">
     <div class="card-title" style="margin-bottom:6px;">\uD83E\uDE9E Charni\u00e8res invisibles + FP encastr\u00e9s</div>
     <p style="font-size:12px;color:var(--gris-text);margin-bottom:12px;">S\u2019applique exactement aux m\u00eames portes que les finitions d\u00e9coratives s\u00e9lectionn\u00e9es ci-dessus (Strat 1 + Strat 2)</p>
