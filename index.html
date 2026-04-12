@@ -1173,7 +1173,24 @@ function parsePartialJSON(text) {
   const clean = text.replace(/```json|```/g,'').trim();
   // Direct parse
   try { return JSON.parse(clean); } catch(e) {}
-  // Extract complete objects one by one with a state machine
+
+  // Strategy 1: find last complete } and close the array
+  // This handles most truncations
+  const lastCloseBrace = clean.lastIndexOf('}');
+  if (lastCloseBrace > 0) {
+    const candidate = clean.slice(0, lastCloseBrace + 1);
+    // Close the array
+    const attempts = [
+      candidate + ']',
+      '[' + candidate + ']',
+      '[' + candidate.slice(candidate.indexOf('{')) + ']',
+    ];
+    for (const a of attempts) {
+      try { const r = JSON.parse(a); if (Array.isArray(r) && r.length) return r; } catch(e) {}
+    }
+  }
+
+  // Strategy 2: extract complete objects one by one with state machine
   const objects = [];
   let depth = 0, start = -1, inStr = false, esc = false;
   for (let i = 0; i < clean.length; i++) {
@@ -1187,15 +1204,30 @@ function parsePartialJSON(text) {
       depth--;
       if (depth === 0 && start >= 0) {
         try {
-          const obj = JSON.parse(clean.slice(start, i+1));
-          if (obj && (obj.repere || obj.local_ext || obj.niveau)) objects.push(obj);
+          const obj = JSON.parse(clean.slice(start, i + 1));
+          if (obj && (obj.repere || obj.r || obj.local_ext || obj.e)) objects.push(obj);
         } catch(e) {}
         start = -1;
       }
     }
   }
   if (objects.length > 0) return objects;
-  throw new Error('Réponse IA illisible. PDF trop volumineux — spécifiez un niveau précis dans le champ "Niveau".');
+
+  // Strategy 3: strip the truncated last object
+  // Find the last complete object ending with "}," or "}" before a newline
+  const match = clean.match(/^([\s\S]*\})\s*,?\s*\{[^}]*$/);
+  if (match) {
+    try {
+      const r = JSON.parse(match[1].trim() + ']');
+      if (Array.isArray(r) && r.length) return r;
+    } catch(e) {}
+    try {
+      const r = JSON.parse('[' + match[1].trim().replace(/^\[/,'') + ']');
+      if (Array.isArray(r) && r.length) return r;
+    } catch(e) {}
+  }
+
+  throw new Error('Réponse IA tronquée. Spécifiez un niveau dans le champ "Niveau" pour réduire le volume (ex: R+1).');
 }
 
 async function lancerRecoIA() {
