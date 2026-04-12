@@ -1240,20 +1240,58 @@ Réponds avec UNIQUEMENT le tableau JSON, rien d\'autre.`;
       const clean = text.replace(/```json|```/g,'').trim();
       portes = parsePartialJSON(clean);
     } else {
-      // Claude
+      // Claude — compact format to avoid token limit, then double-check pass
+      const promptCompact = `Tu es expert BTP. Analyse ce plan PDF et liste TOUTES les portes.
+Réponds UNIQUEMENT en JSON compact, sans markdown, chaque objet sur une ligne :
+[{"r":"repère","n":"niveau","i":"local intérieur (NOM du local UNIQUEMENT, jamais Nouveau/Existant)","e":"local extérieur (NOM du local UNIQUEMENT)"}]
+${niveau ? 'Niveau concerné: "'+niveau+'"' : ''}
+RÈGLE ABSOLUE: "i" et "e" = noms de pièces UNIQUEMENT (ex: Chambre, Escalier, Hall). JAMAIS "Nouveau", "Existant", "Neuf".
+${instruct ? instruct : ''}`;
+
       const resp = await fetch('https://api.anthropic.com/v1/messages',{
         method:'POST', headers:getHeaders(),
         body:JSON.stringify({
-          model:window._workingModel||'claude-sonnet-4-6', max_tokens:4000,
+          model:window._workingModel||'claude-sonnet-4-6', max_tokens:8000,
           messages:[{role:'user',content:[
             {type:'document',source:{type:'base64',media_type:'application/pdf',data:planFileData}},
-            {type:'text',text:prompt}
+            {type:'text',text:promptCompact}
           ]}]
         })
       });
+      if(!resp.ok) { const e=await resp.json().catch(()=>({})); throw new Error(`Claude ${resp.status}: ${e?.error?.message||''}`); }
       const data = await resp.json();
       const text = data.content?.[0]?.text || '[]';
-      portes = JSON.parse(text.replace(/```json|```/g,'').trim());
+      const portesBrut = parsePartialJSON(text.replace(/```json|```/g,'').trim());
+
+      // Double-check pass: ask Claude to verify locals are real room names
+      const echantillon = portesBrut.slice(0,30).map(p=>`${p.r||p.repere}: i="${p.i||p.local_int}" e="${p.e||p.local_ext}"`).join('\n');
+      const promptVerif = `Voici un extrait du tableau de portes extrait d'un plan BTP :
+${echantillon}
+
+TÂCHE: Corrige uniquement les cases "i" et "e" qui contiennent un état de rénovation (Nouveau, Existant, Neuf, Conservé, etc.) au lieu d'un nom de local.
+Si une case contient un état → remplace-la par "" (chaîne vide).
+Renvoie le même JSON corrigé, UNIQUEMENT les entrées modifiées, format: [{"r":"repère","i":"...","e":"..."}]
+Si aucune correction nécessaire, réponds: []`;
+
+      const resp2 = await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST', headers:getHeaders(),
+        body:JSON.stringify({
+          model:window._workingModel||'claude-sonnet-4-6', max_tokens:2000,
+          messages:[{role:'user',content:[{type:'text',text:promptVerif}]}]
+        })
+      });
+      if(resp2.ok) {
+        const d2 = await resp2.json();
+        const t2 = (d2.content?.[0]?.text||'[]').replace(/```json|```/g,'').trim();
+        try {
+          const corrections = JSON.parse(t2);
+          corrections.forEach(fix => {
+            const idx = portesBrut.findIndex(p=>(p.r||p.repere)===fix.r);
+            if(idx>=0) { if(fix.i!==undefined) portesBrut[idx].i=fix.i; if(fix.e!==undefined) portesBrut[idx].e=fix.e; }
+          });
+        } catch(e) { /* ignore correction errors */ }
+      }
+      portes = portesBrut;
     }
     // Normalize compact format {"r","n","i","e"} to full format
     const RENO_VALS = ['nouveau','existant','neuf','conservé','replaquer','repeindre','porte neuve'];
