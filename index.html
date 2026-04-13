@@ -379,6 +379,14 @@
 <!-- ============ TAB 0: RÈGLES DE BASE ============ -->
 <div class="panel" id="panel-rules" style="display:none;">
 
+  <!-- PATTERNS EDITOR -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">🔧 Règles quincaillerie par type de local</div>
+    <p style="font-size:12px;color:var(--gris-text);margin-bottom:12px;">Ces valeurs sont appliquées automatiquement lors de l'import selon le type de local détecté (WC, Escalier, Bureau…). Modifiez selon vos conventions de projet.</p>
+    <div id="patternsEditorList" style="max-height:400px;overflow-y:auto;"></div>
+    <button class="btn btn-primary btn-sm" onclick="renderPatternsEditor()" style="margin-top:8px;">🔄 Actualiser</button>
+  </div>
+
   <!-- Destination + Upload notices -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
     
@@ -811,7 +819,7 @@
           <th>Ouverture</th>
           <th>Larg. VTL</th>
           <th>Hauteur</th>
-          <th>Feu</th>
+          <th>Feu</th><th>Acou.</th>
           <th>Acoustique</th>
           <th>Huisserie</th>
           <th>Porte</th>
@@ -2065,7 +2073,7 @@ async function exporterExcel() {
         cell(19, rowNum, null),  // S = Tenture
         cell(20, rowNum, null),  // T = Oculus
         cell(21, rowNum, porte && porte.das_ssi==='Oui' ? 'Oui' : null),
-        cell(22, rowNum, null),  // V = Anti-effraction
+        cell(22, rowNum, porte && porte.anti_effraction ? porte.anti_effraction : null),  // V = Anti-effraction
         cell(23, rowNum, porte ? porte.controle_acces : null),
         cell(24, rowNum, porte ? porte.ferrage : null),
         cell(25, rowNum, porte ? porte.serrure : null),
@@ -3750,7 +3758,7 @@ function appliquerAffectation(key) {
     if (!match) return;
     if (key === 'das') r.das_ssi = 'Oui';
     else if (key === 'ca') r.controle_acces = r.controle_acces || 'CA - badge';
-    else if (key === 'antieff') r.notes = (r.notes?r.notes+' | ':'')+'Anti-effraction — voir programme';
+    else if (key === 'antieff') { r.anti_effraction = 'Voir programme'; r.notes = (r.notes?r.notes+' | ':'')+'Anti-effraction — voir programme'; }
     count++;
   });
   renderTable(); renderStats();
@@ -3764,6 +3772,32 @@ document.addEventListener('click', function(e) {
     document.querySelectorAll('.dir-popover.open').forEach(function(p){ p.classList.remove('open'); });
   }
 });
+
+
+function renderPatternsEditor() {
+  const div = document.getElementById('patternsEditorList');
+  if (!div) return;
+  const fields = ['serrure','cylindre','garniture','ferrage','ferme_porte','finition'];
+  const labels = {serrure:'Serrure',cylindre:'Cylindre',garniture:'Garniture',ferrage:'Ferrage',ferme_porte:'Ferme-porte',finition:'Finition'};
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+  html += '<thead><tr style="background:var(--bleu);color:white;">';
+  html += '<th style="padding:6px 8px;text-align:left;">Type de local</th>';
+  fields.forEach(f => { html += '<th style="padding:6px 8px;text-align:left;">'+labels[f]+'</th>'; });
+  html += '</tr></thead><tbody>';
+  Object.entries(PATTERNS).forEach(([key, pat], i) => {
+    const bg = i%2===0?'white':'#f8fafc';
+    html += '<tr style="background:'+bg+';">';
+    html += '<td style="padding:5px 8px;font-weight:500;color:var(--bleu);white-space:nowrap;">'+key.replace(/_/g,' ')+'</td>';
+    fields.forEach(f => {
+      html += '<td style="padding:3px 4px;"><input value="'+(pat[f]||'')+'" '
+        + 'oninput="PATTERNS[\''+key+'\'][\''+f+'\']=this.value" '
+        + 'style="width:100%;padding:2px 4px;border:1px solid #e2e8f0;border-radius:3px;font-size:11px;"></td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  div.innerHTML = html;
+}
 
 // =============================================
 // INIT
