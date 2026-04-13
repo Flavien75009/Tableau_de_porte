@@ -387,65 +387,7 @@
     <button class="btn btn-primary btn-sm" onclick="renderPatternsEditor()" style="margin-top:8px;">🔄 Actualiser</button>
   </div>
 
-  <!-- Destination + Upload notices -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-    
-    <div class="card">
-      <div class="card-title">🏗 Destination du bâtiment</div>
-      <div class="form-grid form-grid-2" style="margin-bottom:12px;">
-        <div>
-          <label>Type de bâtiment</label>
-          <select id="destSelect" onchange="changerDestination(this.value)" style="font-size:14px;font-weight:500;">
-            <option value="Bureaux (BUP)">Bureaux (BUP)</option>
-            <option value="Hôtels (ERP type O)">Hôtels (ERP type O)</option>
-            <option value="Logements collectifs">Logements collectifs</option>
-            <option value="Autres">Autres</option>
-          </select>
-        </div>
-        <div>
-          <label>Famille (logements)</label>
-          <select id="familleSelect" style="opacity:0.4;pointer-events:none;">
-            <option>2e famille</option><option>3e famille</option>
-            <option>4e famille</option><option>IGH</option>
-          </select>
-        </div>
-      </div>
-      <div style="background:var(--accent-light);border-radius:6px;padding:8px 12px;font-size:12px;color:#1d4ed8;">
-        <strong>Règle automatique :</strong> tout local avec degré feu → ferme-porte = Oui
-      </div>
-    </div>
 
-    <div class="card">
-      <div class="card-title">📄 Notices projet (optionnel)</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-        <div>
-          <label>Notice sécurité incendie</label>
-          <div class="upload-zone" id="uploadSecu" style="padding:14px;cursor:pointer;" 
-               onclick="document.getElementById('fileSecu').click()"
-               ondragover="event.preventDefault()" 
-               ondrop="dropNotice(event,'secu')">
-            <p style="font-size:12px;" id="labelSecu">PDF sécurité</p>
-          </div>
-          <input type="file" id="fileSecu" accept=".pdf" style="display:none" onchange="loadNotice(event,'secu')">
-        </div>
-        <div>
-          <label>Notice acoustique</label>
-          <div class="upload-zone" id="uploadAcou" style="padding:14px;cursor:pointer;"
-               onclick="document.getElementById('fileAcou').click()"
-               ondragover="event.preventDefault()"
-               ondrop="dropNotice(event,'acou')">
-            <p style="font-size:12px;" id="labelAcou">PDF acoustique</p>
-          </div>
-          <input type="file" id="fileAcou" accept=".pdf" style="display:none" onchange="loadNotice(event,'acou')">
-        </div>
-      </div>
-      <button class="btn btn-primary" id="btnAnalyseNotices" onclick="analyserNotices()" disabled style="width:100%;">
-        <span id="spinNotices" style="display:none" class="spinner"></span>
-        Analyser les notices et mettre à jour les règles ↗
-      </button>
-      <div id="noticesStatus" style="font-size:11px;color:var(--gris-text);margin-top:6px;"></div>
-    </div>
-  </div>
 
   <!-- Synthesis table -->
   <div class="card" id="synthCard">
@@ -575,8 +517,11 @@
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost btn-sm" onclick="selectAllReco(true)">Tout sélectionner</button>
         <button class="btn btn-ghost btn-sm" onclick="selectAllReco(false)">Tout désélectionner</button>
-        <button class="btn btn-primary btn-sm" onclick="envoyerVersTab2()">
-          Envoyer sélection vers Pré-remplissage →
+        <button class="btn btn-ghost btn-sm" onclick="envoyerVersTab2()">
+          Vers Pré-remplissage IA →
+        </button>
+        <button class="btn btn-success btn-sm" onclick="recoVersTableauDirect()" style="font-weight:600;">
+          📋 Tableau direct →
         </button>
       </div>
     </div>
@@ -1402,6 +1347,81 @@ function ajouterPorteManuelle() {
 function ajouterRecoManuelle() {
   ajouterPorteManuelle();
   ['manRepere','manLocalInt','manLocalExt','manContexte'].forEach(id=>document.getElementById(id).value='');
+}
+
+
+function recoVersTableauDirect() {
+  const sel = recoList.filter(r => r.selected);
+  if (!sel.length) { alert('Sélectionnez au moins une porte.'); return; }
+  
+  const RENO_VALS = ['nouveau','existant','neuf','conservé','replaquer','repeindre'];
+  sel.forEach(p => {
+    // Clean reno values from locals
+    let li = p.local_int || '';
+    let le = p.local_ext || '';
+    if (RENO_VALS.includes(li.toLowerCase())) { p.neuf_reno = li.toLowerCase().includes('exist') ? "Porte existante conservée en l'état" : "Porte neuve"; li = ''; }
+    if (RENO_VALS.includes(le.toLowerCase())) { le = ''; }
+
+    const typeLocal = normaliserLocal(le || li);
+    const pat = PATTERNS[typeLocal] || {};
+
+    // Apply currentRules for feu/acoustique
+    const noticeRule = currentRules.find(r => r.key === typeLocal);
+    const feu = normalizeFeu(p.degre_feu || (noticeRule ? (noticeRule.feu_notice || noticeRule.feu_base) : '') || pat.degre_feu || '');
+    const acou = p.acoustique || (noticeRule ? (noticeRule.acou_notice || noticeRule.acou_base) : '') || pat.acoustique || '';
+
+    // Niveau → huisserie rule
+    const niv = (p.niveau || '').toLowerCase();
+    const huisserie = (niv.startsWith('ss') || niv.startsWith('s-') || niv.startsWith('r-') || niv.includes('sous')) ? 'Métallique' : 'Bois';
+
+    // Lot auto
+    const leL = le.toLowerCase();
+    const extKw = ['extérieur','ext.','façade','terrasse','jardin','rue','parking ext'];
+    const lot = extKw.some(k => leL.includes(k)) ? 'Menuiserie extérieure'
+               : (pat.vantail||'').toLowerCase() === 'métallique' ? 'Métallerie'
+               : (p.lot || 'Menuiserie');
+
+    const row = {
+      _id: 'row_' + Date.now() + '_' + Math.random().toString(36).slice(2),
+      repere: p.repere || genererRepere(p.niveau),
+      niveau: p.niveau || '',
+      local_int: li,
+      local_ext: le,
+      lot,
+      neuf_reno: p.neuf_reno || 'Porte neuve',
+      nb_vantaux: pat.nb_vantaux || 1,
+      ouverture: pat.type_ouverture || 'Simple action',
+      largeur: pat.nb_vantaux === 2 ? '900+200' : '900',
+      hauteur: '2100',
+      degre_feu: feu,
+      acoustique: acou,
+      huisserie: pat.huisserie || huisserie,
+      vantail: pat.vantail || 'Bois',
+      finition: pat.finition || '',
+      das_ssi: pat.das_ssi || '',
+      controle_acces: '',
+      ferrage: pat.ferrage || 'Paumelles inox (4 points)',
+      serrure: pat.serrure || '',
+      cylindre: pat.cylindre || '',
+      ferme_porte: pat.ferme_porte || (feu ? 'FP réglable' : ''),
+      garniture: pat.garniture || '',
+      butoir: pat.butoir || '',
+      condamnation_sf: pat.condamnation_sf || '',
+      notes: '',
+    };
+    tableRows.push(row);
+  });
+
+  renderTable();
+  renderStats();
+  document.getElementById('cnt-tableau').textContent = tableRows.length;
+  showTab('affectation');
+}
+
+function genererRepere(niveau) {
+  const n = (niveau || 'RDC').replace(/[^A-Z0-9+]/gi, '').toUpperCase();
+  const existing = tableRows.filter(r => (r.niveau||'').toUpperCase() === (niveau||'').toUpperCase()).length;
+  return 'P-' + n + '-' + String(existing + 1).padStart(3, '0');
 }
 
 function envoyerVersTab2() {
@@ -3441,7 +3461,9 @@ function normaliserLocalGroupe(local) {
 
 
 function toutAppliquerEtTableau() {
-  // Apply all checked sections
+  // Apply all checked sections silently (no individual alerts)
+  const origAlert = window.alert;
+  window.alert = () => {}; // silence individual alerts
   ['das','ca','antieff'].forEach(key => {
     const div = document.getElementById('aff_locals_'+key);
     if (div && div.querySelectorAll('input[data-local]:checked').length > 0) {
@@ -3465,8 +3487,11 @@ function toutAppliquerEtTableau() {
   // Apply all feu/acou notices
   if (window._editableFeu && window._editableFeu.length) appliquerTousNotices('_editableFeu','feu');
   if (window._editableAcou && window._editableAcou.length) appliquerTousNotices('_editableAcou','acou');
+  window.alert = origAlert; // restore alerts
+  renderTable(); renderStats();
   // Navigate to tableau
   showTab('tableau');
+  origAlert('✅ Tous les critères appliqués ! Votre tableau est prêt.');
 }
 
 function buildNoticeCard(dataKey, title, color, unit, sortedLocals) {
@@ -3746,12 +3771,17 @@ function appliquerAffectation(key) {
     const leG = normaliserLocalGroupe(r.local_ext||'').toLowerCase();
     let match = false;
     checkedLocals.forEach(l => {
-      if (!match && (liG.includes(l)||leG.includes(l)||l.includes(liG)||l.includes(leG))) {
+      if (match) return;
+      // More permissive matching: either group contains the other, or starts with same chars
+      const lNorm = l.replace(/[^a-zàâäéèêëîïôùûü]/gi,'').toLowerCase();
+      const liNorm = liG.replace(/[^a-zàâäéèêëîïôùûü]/gi,'').toLowerCase();
+      const leNorm = leG.replace(/[^a-zàâäéèêëîïôùûü]/gi,'').toLowerCase();
+      const localMatch = liNorm.includes(lNorm)||leNorm.includes(lNorm)||lNorm.includes(liNorm)||lNorm.includes(leNorm)||liG.includes(l)||leG.includes(l)||l.includes(liG)||l.includes(leG);
+      if (localMatch) {
         // Check direction filter
         const dirs = getCheckedDirs(key, l);
         if (dirs === null) { match = true; return; }
-        // dirs = array of allowed partner locals
-        const partnerG = liG.includes(l) ? leG : liG;
+        const partnerG = (liNorm.includes(lNorm)||l.includes(liG)) ? leG : liG;
         if (dirs.some(d => partnerG.includes(d)||d.includes(partnerG))) match = true;
       }
     });
