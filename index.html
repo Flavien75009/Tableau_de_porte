@@ -764,8 +764,7 @@
           <th>Ouverture</th>
           <th>Larg. VTL</th>
           <th>Hauteur</th>
-          <th>Feu</th><th>Acou.</th>
-          <th>Acoustique</th>
+          <th>Feu</th><th>Acou. (dB)</th>
           <th>Huisserie</th>
           <th>Porte</th>
           <th>Finition</th>
@@ -3355,8 +3354,7 @@ async function analyserNotices2() {
             <td style="padding:8px;text-align:center;color:#94a3b8;">↔</td>
             <td style="padding:8px;">${local2}</td>
             <td style="padding:8px;text-align:center;">${val}</td>
-            <td style="padding:8px;text-align:center;color:${ex.fp_requis?'#16a34a':'#94a3b8'};">${ex.fp_requis === true ? '✓' : ex.fp_requis === false ? '✗' : '—'}</td>
-            <td style="padding:8px;text-align:center;color:${ex.das_ssi?'#ea580c':'#94a3b8'};">${ex.das_ssi === true ? '✓' : '—'}</td>
+            <td style="padding:8px;text-align:center;color:${ex.das_ssi?'#ea580c':'#94a3b8'};">${ex.das_ssi === true ? '🔴 Oui' : '—'}</td>
             <td style="padding:8px;text-align:center;font-size:11px;font-weight:600;color:#6366f1;">${ex.page_ref ? 'p.' + ex.page_ref : '—'}</td>
             <td style="padding:8px;font-size:11px;color:#475569;">${ex.note ? `<em style="color:#64748b;">"${ex.note}"</em>` : ''}</td>
           </tr>`;
@@ -3560,6 +3558,91 @@ function addNoticeRow(dataKey, unit) {
 
 function removeNoticeRow(dataKey, idx) {
   if (window[dataKey]) { window[dataKey].splice(idx, 1); genererListeLocaux(); }
+}
+
+
+// ═══════════════════════════════════════════
+// AFFECTATION APPLY FUNCTIONS — Global scope
+// ═══════════════════════════════════════════
+
+function getCheckedDirs(sectionKey, local) {
+  const safeKey = local.replace(/[^a-zA-Z0-9]/g, '_');
+  const el = document.getElementById('dir_' + sectionKey + '_' + safeKey);
+  if (!el || !el.classList.contains('open')) return null; // null = all directions
+  const allCb = el.querySelector('[data-dir-all]');
+  if (allCb && allCb.checked) return null;
+  const checked = [...el.querySelectorAll('input[data-dir]:checked')].map(i => i.dataset.dir.toLowerCase());
+  return checked.length ? checked : null;
+}
+
+function appliquerFacadesSAN() {
+  const cb = document.getElementById('aff_facade_san');
+  if (!cb || !cb.checked) { alert("Cochez d’abord la case MIN Façade SAN."); return; }
+  const SAS_KW = ['sas','sanitaire','vestiaire','aisance','wc hommes','wc femmes','toilette','cabine'];
+  const WC_KW = ['wc','cabine','pmr','douche','sanitaire ind'];
+  let count = 0;
+  tableRows.forEach(r => {
+    const li = (r.local_int||'').toLowerCase();
+    const le = (r.local_ext||'').toLowerCase();
+    const isSAS = SAS_KW.some(k => li.includes(k) || le.includes(k));
+    const isWC = WC_KW.some(k => li.includes(k) || le.includes(k));
+    if (isSAS && isWC) { r.lot = 'MIN Façade SAN'; count++; }
+  });
+  renderTable();
+  if (count) alert(count + " porte(s) passée(s) en MIN Façade SAN !");
+}
+
+function appliquerDecoFinition(finition, sectionKey) {
+  const div = document.getElementById('aff_locals_' + sectionKey);
+  if (!div) return;
+  const checkedLocals = [...div.querySelectorAll('input[data-local]:checked')].map(cb => cb.dataset.local.toLowerCase());
+  if (!checkedLocals.length) { alert("Cochez au moins un local."); return; }
+  const applyFP = document.getElementById('aff_deco_fp_apply') && document.getElementById('aff_deco_fp_apply').checked;
+  let count = 0;
+  tableRows.forEach(r => {
+    const liG = normaliserLocalGroupe(r.local_int||'').toLowerCase();
+    const leG = normaliserLocalGroupe(r.local_ext||'').toLowerCase();
+    if (checkedLocals.some(l => liG.includes(l)||leG.includes(l)||l.includes(liG)||l.includes(leG))) {
+      r.finition = finition;
+      if (applyFP) {
+        r.ferrage = 'Charnières invisibles';
+        if (r.ferme_porte || r.degre_feu) r.ferme_porte = 'FP encastré';
+      }
+      count++;
+    }
+  });
+  renderTable();
+  const card = document.getElementById('card_' + sectionKey);
+  if (card) card.style.borderLeftColor = '#16a34a';
+  alert(count + ' porte(s) → ' + finition + ' !');
+}
+
+function appliquerFeuNotice(from, to, feu) {
+  if (!feu) return;
+  let count = 0;
+  tableRows.forEach(r => {
+    const li = (r.local_int||'').toLowerCase();
+    const le = (r.local_ext||'').toLowerCase();
+    const mf = !from || li.includes(from.toLowerCase()) || le.includes(from.toLowerCase());
+    const mt = !to || li.includes(to.toLowerCase()) || le.includes(to.toLowerCase());
+    if (mf && mt) { r.degre_feu = normalizeFeu(feu); count++; }
+  });
+  renderTable();
+  alert(count + ' porte(s) → ' + feu);
+}
+
+function appliquerAcouNotice(from, to, db) {
+  if (!db) return;
+  let count = 0;
+  tableRows.forEach(r => {
+    const li = (r.local_int||'').toLowerCase();
+    const le = (r.local_ext||'').toLowerCase();
+    const mf = !from || li.includes(from.toLowerCase()) || le.includes(from.toLowerCase());
+    const mt = !to || li.includes(to.toLowerCase()) || le.includes(to.toLowerCase());
+    if (mf && mt) { r.acoustique = db; count++; }
+  });
+  renderTable();
+  alert(count + ' porte(s) → ' + db + ' dB');
 }
 
 function buildSimpleSection(key, title, desc, sortedLocals, localBadge, isPreChecked) {
