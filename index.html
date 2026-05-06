@@ -513,7 +513,7 @@
   <!-- Résultats liste -->
   <div class="card" id="recoResultsCard" style="display:none">
     <div class="card-title" style="justify-content:space-between;">
-      <span>📋 Liste des portes (<span id="cnt-recon">0</span>)</span>
+      <span>📋 <span id="cnt-recon">0</span> portes détectées — <button onclick="confirmerNbPortes()" style="background:none;border:none;color:#2563eb;font-size:12px;cursor:pointer;text-decoration:underline;">Nombre incorrect ? Relancer</button></span>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost btn-sm" onclick="selectAllReco(true)">Tout sélectionner</button>
         <button class="btn btn-ghost btn-sm" onclick="selectAllReco(false)">Tout désélectionner</button>
@@ -927,7 +927,7 @@ async function testerCle() {
   st.textContent = 'Test en cours…';
 
   if (_currentProvider === 'gemini') {
-    const MODELS = ['gemini-2.0-flash','gemini-2.0-flash-lite','gemini-2.5-flash','gemini-2.0-flash-001','gemini-2.0-flash-lite-001'];
+    const MODELS = ['gemini-2.0-flash','gemini-2.5-flash-preview-04-17','gemini-2.5-flash','gemini-1.5-flash','gemini-2.0-flash-lite','gemini-1.5-pro'];
     for (const m of MODELS) {
       try {
         window._workingGeminiModel = m;
@@ -940,7 +940,13 @@ async function testerCle() {
           return;
         }
         const err = await r.json();
-        if (r.status === 404 || (err?.error?.message||'').includes('not found') || (err?.error?.message||'').includes('no longer available')) continue;
+        const errMsg = err?.error?.message||'';
+        if (r.status === 404 || errMsg.includes('not found') || errMsg.includes('no longer available') || errMsg.includes('does not exist')) continue;
+        if (r.status === 401 || errMsg.toLowerCase().includes('not valid') || errMsg.includes('invalid')) {
+          st.textContent = '❌ Clé Gemini invalide. Vérifiez sur aistudio.google.com (menu API Key)';
+          window._workingGeminiModel = null;
+          return;
+        }
         st.textContent = '❌ ' + m + ': ' + (err?.error?.message||r.status).toString().slice(0,80);
         return;
       } catch(e) { st.textContent = '❌ ' + e.message.slice(0,80); return; }
@@ -1296,6 +1302,23 @@ Si aucune correction nécessaire, réponds: []`;
     alert('Erreur reconnaissance plan : '+e.message);
   }
   btn.disabled = false; if(spin) spin.style.display='none';
+}
+
+
+function confirmerNbPortes() {
+  const n = prompt('Combien de portes attendez-vous ? (actuel : ' + recoList.length + ')', recoList.length);
+  if (!n || isNaN(parseInt(n))) return;
+  const expected = parseInt(n);
+  if (expected <= recoList.length) {
+    alert('Le résultat actuel (' + recoList.length + ' portes) semble correct ou supérieur. Vérifiez manuellement.');
+    return;
+  }
+  // Ask to re-run with adjusted instruction
+  const moreInst = 'Il manque des portes. Attendu : ' + expected + ' portes. Sois plus exhaustif, inclus toutes les ouvertures même sans repère.';
+  document.getElementById('recoInstructions').value = moreInst;
+  if (confirm("Relancer l’analyse avec une instruction renforcée pour trouver " + expected + " portes ?")) {
+    lancerRecoIA();
+  }
 }
 
 function afficherResultatsReco(portes) {
@@ -3273,27 +3296,52 @@ async function analyserNotices2() {
 
   try {
     let rawText;
-    const model = window._workingGeminiModel || 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    
-    const gParts = [];
-    if (noticeSecuB64) {
-      gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeSecuB64 } });
-      gParts.push({ text: 'NOTICE SÉCURITÉ INCENDIE ci-dessus.' });
-    }
-    if (noticeAcouB64) {
-      gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeAcouB64 } });
-      gParts.push({ text: 'NOTICE ACOUSTIQUE ci-dessus.' });
-    }
-    gParts.push({ text: NOTICE_SYSTEM + '\nExtrait toutes les exigences feu et acoustique par type de local. JSON uniquement, sans markdown.' });
+    const noticePrompt = NOTICE_SYSTEM + '\nExtrait toutes les exigences feu et acoustique par type de local. JSON uniquement, sans markdown.';
 
-    const resp = await fetch(url, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ contents:[{role:'user', parts: gParts}], generationConfig:{maxOutputTokens:8192,temperature:0.1} })
-    });
-    if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(`Gemini ${resp.status}: ${e?.error?.message}`); }
-    const data = await resp.json();
-    rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+    if (_currentProvider === 'gemini') {
+      const model = window._workingGeminiModel || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+      const gParts = [];
+      if (noticeSecuB64) {
+        gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeSecuB64 } });
+        gParts.push({ text: 'NOTICE SÉCURITÉ INCENDIE ci-dessus.' });
+      }
+      if (noticeAcouB64) {
+        gParts.push({ inline_data: { mime_type: 'application/pdf', data: noticeAcouB64 } });
+        gParts.push({ text: 'NOTICE ACOUSTIQUE ci-dessus.' });
+      }
+      gParts.push({ text: noticePrompt });
+      const resp = await fetch(url, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ contents:[{role:'user', parts: gParts}], generationConfig:{maxOutputTokens:8192,temperature:0.1} })
+      });
+      if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(`Gemini ${resp.status}: ${e?.error?.message}`); }
+      const data = await resp.json();
+      rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+    } else {
+      // Claude branch — supports PDF documents natively
+      const content = [];
+      if (noticeSecuB64) {
+        content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: noticeSecuB64 } });
+        content.push({ type: 'text', text: 'Document 1 : NOTICE SÉCURITÉ INCENDIE' });
+      }
+      if (noticeAcouB64) {
+        content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: noticeAcouB64 } });
+        content.push({ type: 'text', text: 'Document 2 : NOTICE ACOUSTIQUE' });
+      }
+      content.push({ type: 'text', text: noticePrompt });
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: getHeaders(),
+        body: JSON.stringify({
+          model: window._workingModel || 'claude-sonnet-4-6',
+          max_tokens: 8000,
+          messages: [{ role: 'user', content }]
+        })
+      });
+      if (!resp.ok) { const e = await resp.json().catch(()=>({})); throw new Error(`Claude ${resp.status}: ${e?.error?.message||''}`); }
+      const data = await resp.json();
+      rawText = data.content?.[0]?.text || '[]';
+    }
 
     const clean = rawText.replace(/```json|```/g,'').trim();
     const extracted = parsePartialJSON(clean);
@@ -3565,14 +3613,42 @@ function removeNoticeRow(dataKey, idx) {
 // AFFECTATION APPLY FUNCTIONS — Global scope
 // ═══════════════════════════════════════════
 
-function getCheckedDirs(sectionKey, local) {
+// Persistent direction selections: dirSelections[sectionKey][local] = Set of allowed dirs, or null = all
+window._dirSelections = window._dirSelections || {};
+
+function saveDirSelection(sectionKey, local) {
   const safeKey = local.replace(/[^a-zA-Z0-9]/g, '_');
   const el = document.getElementById('dir_' + sectionKey + '_' + safeKey);
-  if (!el || !el.classList.contains('open')) return null; // null = all directions
+  if (!el) return;
   const allCb = el.querySelector('[data-dir-all]');
-  if (allCb && allCb.checked) return null;
-  const checked = [...el.querySelectorAll('input[data-dir]:checked')].map(i => i.dataset.dir.toLowerCase());
-  return checked.length ? checked : null;
+  if (allCb && allCb.checked) {
+    // All selected → no filter
+    if (!window._dirSelections[sectionKey]) window._dirSelections[sectionKey] = {};
+    window._dirSelections[sectionKey][local.toLowerCase()] = null;
+  } else {
+    const checked = [...el.querySelectorAll('input[data-dir]:checked')].map(i => i.dataset.dir.toLowerCase());
+    if (!window._dirSelections[sectionKey]) window._dirSelections[sectionKey] = {};
+    window._dirSelections[sectionKey][local.toLowerCase()] = checked.length ? checked : null;
+  }
+}
+
+function getCheckedDirs(sectionKey, local) {
+  const lkey = local.toLowerCase();
+  // Use persisted selection first (saved when user changes checkboxes)
+  if (window._dirSelections?.[sectionKey]?.[lkey] !== undefined) {
+    return window._dirSelections[sectionKey][lkey];
+  }
+  // Try reading from DOM (first time, popover might be open)
+  const safeKey = local.replace(/[^a-zA-Z0-9]/g, '_');
+  const el = document.getElementById('dir_' + sectionKey + '_' + safeKey);
+  if (el) {
+    const allCb = el.querySelector('[data-dir-all]');
+    if (allCb && allCb.checked) return null; // all = no filter
+    const checked = [...el.querySelectorAll('input[data-dir]:checked')].map(i => i.dataset.dir.toLowerCase());
+    const total = el.querySelectorAll('input[data-dir]').length;
+    if (total > 0 && checked.length < total) return checked.length ? checked : [];
+  }
+  return null; // default: no filter (all directions)
 }
 
 function appliquerFacadesSAN() {
@@ -3702,7 +3778,7 @@ function genererListeLocaux() {
     const adj = getAdjacentLocals(local);
     const adjHtml = adj.length
       ? adj.map(a => `<label style="display:flex;align-items:center;gap:5px;margin-bottom:3px;cursor:pointer;font-size:11px;">
-          <input type="checkbox" data-dir="${a.display}" checked>
+          <input type="checkbox" data-dir="${a.display}" checked onchange="saveDirSelection('${sectionKey}','${local}')">
           <span>${a.display}</span><span style="color:#94a3b8;font-size:10px;">(${a.count})</span>
         </label>`).join('')
       : '<em style="font-size:11px;color:#94a3b8;">—</em>';
@@ -3722,7 +3798,7 @@ function genererListeLocaux() {
         <div style="font-weight:600;font-size:11px;color:var(--bleu);margin-bottom:6px;">Vers quel local ?</div>
         <label style="display:flex;align-items:center;gap:5px;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:11px;">
           <input type="checkbox" data-dir-all="1" checked
-            onchange="this.closest('.dir-popover').querySelectorAll('[data-dir]').forEach(i=>i.checked=this.checked)">
+            onchange="(function(cb,sk,l){cb.closest('.dir-popover').querySelectorAll('[data-dir]').forEach(i=>i.checked=cb.checked);saveDirSelection(sk,l);})(this,'${sectionKey}','${local}')">
           <em style="color:#64748b;">Tous locaux adjacents</em>
         </label>
         ${adjHtml}
